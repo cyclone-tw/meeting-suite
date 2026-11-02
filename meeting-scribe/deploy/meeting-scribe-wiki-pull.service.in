@@ -1,0 +1,15 @@
+# 學生資料（wiki sparse checkout）與擴充包的自動更新（#120）。deploy/install-linux.sh 在設了
+# MEETING_SCRIBE_PULL_DIRS 時把 @DIRS@ 換成那些 git checkout 的路徑，寫到 /etc/systemd/system/。
+# 每個資料夾各自 `git pull --ff-only`；一個失敗不影響其他的，但只要有一個失敗這次就算失敗（systemctl --failed 看得到）。
+[Unit]
+Description=meeting-scribe: pull student data and packs (git checkouts)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# 一定要設：systemd 的 system service 沒有 HOME，git 會讀不到 /root/.gitconfig 的 gh credential helper
+# 與 /root/.ssh/config 的 deploy key 別名，私人 repo 就 pull 不下來
+Environment=HOME=/root
+ExecStart=/bin/sh -c 'rc=0; for d in "$$@"; do /usr/bin/git -C "$$d" pull -q --ff-only || rc=1; done; exit $$rc' pull @DIRS@
+TimeoutStartSec=120

@@ -1,0 +1,13 @@
+{
+  "name": "Cyclone Scribe 會議轉錄",
+  "short_name": "Cyclone Scribe",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#171716",
+  "theme_color": "#2f6f5e",
+  "icons": [
+    {"src": "/icon.svg", "type": "image/svg+xml", "sizes": "any"},
+    {"src": "/icon-192.png", "type": "image/png", "sizes": "192x192"},
+    {"src": "/icon-512.png", "type": "image/png", "sizes": "512x512"}
+  ]
+}

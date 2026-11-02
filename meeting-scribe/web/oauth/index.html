@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Google 授權跳轉回來的頁面（#107）：只把 token 交給同一個網站開著的會議頁面，不載入任何外部檔案、不連任何網址 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Google 授權</title>
+<style>
+  body { margin:0; padding:32px 16px; font:16px/1.6 system-ui, -apple-system, "PingFang TC", "Noto Sans TC", sans-serif; background:#fbf8f3; color:#2b2b2b; }
+  @media (prefers-color-scheme: dark) { body { background:#1c1b1a; color:#eee; } }
+  p { max-width:30em; margin:0 auto; }
+</style>
+</head>
+<body>
+<p id="msg">處理中…</p>
+<script>
+(() => {
+  // Google 把結果放在網址的 # 後面：先讀出來，馬上從網址列與瀏覽紀錄拿掉
+  const h = new URLSearchParams(location.hash.slice(1));
+  history.replaceState(null, "", location.pathname);
+  const msg = {};
+  for (const k of ["access_token", "expires_in", "scope", "state", "error"]) if (h.has(k)) msg[k] = h.get(k);
+  const say = (t) => { document.getElementById("msg").textContent = t; };
+  if (!msg.state) { say("這個頁面只用來接 Google 授權，可以關掉。"); return; }
+  // 會議頁面只收它自己發出的那一次授權（state 對得上才收），所以這裡不用另外檢查
+  try { const ch = new BroadcastChannel("ms-google-auth"); ch.postMessage(msg); setTimeout(() => ch.close(), 1000); } catch (e) { /* 舊瀏覽器 */ }
+  try { if (window.opener) window.opener.postMessage({ msGoogleAuth: msg }, location.origin); } catch (e) { /* Google 的頁面會切斷 opener */ }
+  say(msg.error ? "授權沒有完成。可以關掉這個視窗，回到會議頁面再按一次。" : "授權完成，可以關掉這個視窗，回到會議頁面。");
+  setTimeout(() => window.close(), 400);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+{
+  "name": "cyclone-recording-transcriber",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.7.0",
+  "scripts": {
+    "brief": "node scripts/package-brief.mjs",
+    "transcribe:groq": "node scripts/transcribe-groq.mjs",
+    "transcribe:mlx": "node scripts/transcribe-mlx.mjs",
+    "transcribe": "node scripts/transcribe-package.mjs",
+    "transcript": "node scripts/transcript-cli.mjs",
+    "export:voice-memos": "node scripts/export-voice-memos.mjs",
+    "download-yt": "node scripts/download-yt.mjs",
+    "transcribe-apify": "node scripts/transcribe-apify.mjs",
+    "remote": "node scripts/transcribe-remote.mjs",
+    "subtitle": "node scripts/subtitle-cli.mjs",
+    "studio": "node scripts/subtitle-studio.mjs",
+    "speakers": "node scripts/speaker-tracks.mjs",
+    "studio:start": "node scripts/studio-ctl.mjs start",
+    "studio:stop": "node scripts/studio-ctl.mjs stop",
+    "studio:status": "node scripts/studio-ctl.mjs status",
+    "studio:app": "node scripts/studio-ctl.mjs app",
+    "job": "node scripts/transcript-job.mjs",
+    "test": "CYCLONE_ASR_PROFILE_USER= node --test test/transcriber.test.mjs test/remote.test.mjs test/archive.test.mjs test/helpers.test.mjs test/vocabulary.test.mjs test/subtitle.test.mjs test/studio.test.mjs test/studio-ctl.test.mjs test/cuts.test.mjs test/trim.test.mjs test/cut-suggest.test.mjs test/youtube.test.mjs test/bilingual.test.mjs test/wiki-handoff.test.mjs test/shorts.test.mjs test/subtitle-box.test.mjs test/name-fix.test.mjs test/meeting-recap.test.mjs test/studio-drive.test.mjs test/shared-components.test.mjs test/no-forks.test.mjs test/soniox-upload.test.mjs test/speaker-tracks.test.mjs test/user-profile.test.mjs",
+    "vocab:import-zerotype": "node scripts/vocab-import-zerotype.mjs",
+    "vocab:export-zerotype": "node scripts/vocab-export-zerotype.mjs",
+    "vocab:harvest": "node scripts/vocab-harvest.mjs",
+    "archive": "node scripts/archive-package.mjs"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
+    "openai": "^6.44.0",
+    "opencc-js": "^1.4.0",
+    "wavefile": "^11.0.0"
+  }
+}

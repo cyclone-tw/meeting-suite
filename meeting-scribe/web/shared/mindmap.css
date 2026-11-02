@@ -1,0 +1,45 @@
+/* 心智圖元件（#155）的樣式：App 與字幕工作室共用。class 一律 mm- 開頭；配色看元件自己的 data-mm-theme（dark／light），不靠頁面的變數。
+   頁面可以用 --mm-accent 換焦點框的顏色。 */
+.mm, .mm-viewer { --mm-bg:#15171c; --mm-ui:#1f232b; --mm-ui-2:#2a2f39; --mm-fg:#ecebe6; --mm-muted:#a6a9b0; --mm-line:#363c47; --mm-warn:#ff8a65; }
+.mm[data-mm-theme="light"], .mm-viewer[data-mm-theme="light"] { --mm-bg:#faf8f4; --mm-ui:#ffffff; --mm-ui-2:#f1efea; --mm-fg:#1f2328; --mm-muted:#5f636a; --mm-line:#e3e0da; --mm-warn:#a4492f; }
+.mm [hidden], .mm-viewer[hidden] { display:none !important; }
+
+.mm-tools { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 10px; }
+.mm-tools button, .mm-bar button, .mm-edit button { min-height:36px; padding:4px 12px; border:1px solid var(--mm-line); border-radius:8px; background:var(--mm-ui-2); color:var(--mm-fg); font:inherit; font-size:14px; line-height:1.2; cursor:pointer; }
+.mm-tools button { background:var(--mm-ui); }
+.mm-tools button:hover, .mm-bar button:hover, .mm-edit button:hover:not(:disabled) { border-color:var(--mm-muted); }
+.mm-tools button[aria-pressed="true"] { border-color:var(--mm-accent, #2f6f5e); font-weight:700; }
+.mm button:focus-visible, .mm-viewer button:focus-visible { outline:2px solid var(--mm-accent, #2f6f5e); outline-offset:1px; }
+.mm-note { margin:0 0 10px; font-size:14px; color:var(--mm-muted); }
+.mm-note.mm-err { color:var(--mm-warn); font-weight:600; }
+
+.mm-viewer { display:flex; flex-direction:column; margin:0 0 12px; border:1px solid var(--mm-line); border-radius:12px; overflow:hidden; background:var(--mm-bg); color:var(--mm-fg); }
+.mm-bar { display:flex; flex-wrap:wrap; gap:4px; align-items:center; padding:6px; border-bottom:1px solid var(--mm-line); background:var(--mm-ui); }
+.mm-bar button { min-width:36px; padding:4px 10px; }
+.mm-sep { flex:1; }
+.mm-scale { min-width:3.6em; text-align:center; font-size:13px; font-variant-numeric:tabular-nums; color:var(--mm-muted); }
+@media (max-width:560px) { .mm-bar { gap:3px; padding:5px; } .mm-bar button { padding:4px 7px; } .mm-scale { min-width:3em; } }
+.mm-body { position:relative; height:clamp(280px, 58vh, 560px); overflow:hidden; touch-action:none; cursor:grab; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; overscroll-behavior:contain; }
+.mm-body.mm-dragging { cursor:grabbing; }
+.mm-body:focus-visible { outline:2px solid var(--mm-accent, #2f6f5e); outline-offset:-2px; }
+.mm-stage { position:absolute; left:0; top:0; transform-origin:0 0; will-change:transform; }
+.mm-stage svg { display:block; max-width:none; overflow:visible; }
+.mm-stage .mm-node { cursor:pointer; }
+.mm-stage .mm-node:focus { outline:none; }
+.mm-stage .mm-node:focus-visible .mm-box { stroke:var(--mm-accent, #2f6f5e); stroke-width:3; }
+.mm-hint { margin:0; padding:4px 10px 6px; font-size:12px; color:var(--mm-muted); background:var(--mm-ui); border-top:1px solid var(--mm-line); }
+/* 大畫面：檢視搬到 body 底下蓋滿視窗 */
+.mm-viewer.mm-full { position:fixed; inset:0; z-index:30; margin:0; border:0; border-radius:0; }
+.mm-viewer.mm-full .mm-bar { padding:max(6px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) 6px max(8px, env(safe-area-inset-left)); }
+.mm-viewer.mm-full .mm-body { flex:1; height:auto; }
+.mm-viewer.mm-full .mm-hint { padding-bottom:max(6px, env(safe-area-inset-bottom)); }
+body.mm-full-open { overflow:hidden; }
+
+/* 編輯大綱：一格一列，依層次縮排 */
+.mm-edit { margin:12px 0 0; padding:10px; border:1px solid var(--mm-line); border-radius:12px; background:var(--mm-ui); color:var(--mm-fg); }
+.mm-row { display:flex; gap:4px; align-items:center; margin:0 0 6px; padding-left:calc(var(--d) * 18px); }
+.mm-row input { flex:1; min-width:0; min-height:34px; border:1px solid var(--mm-line); border-radius:8px; background:var(--mm-bg); color:var(--mm-fg); padding:2px 8px; font:inherit; font-size:15px; }
+.mm-row:first-child input { font-weight:700; }
+.mm-row button { flex:none; width:32px; height:32px; min-height:0; padding:0; background:var(--mm-bg); }
+.mm-edit button:disabled { opacity:.35; cursor:default; }
+.mm-foot { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0 0; }

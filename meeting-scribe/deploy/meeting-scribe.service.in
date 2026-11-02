@@ -1,0 +1,48 @@
+# meeting-scribe 的 systemd unit 範本（#108）。deploy/install-linux.sh 把 @…@ 換掉後寫到 /etc/systemd/system/。
+# 專用帳號、只綁 127.0.0.1；家目錄唯讀，只開放服務自己要寫的幾個資料夾。
+[Unit]
+Description=meeting-scribe live meeting transcription
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+Group=@USER@
+WorkingDirectory=@REPO@
+ExecStart=@PYTHON@ -I @REPO@/server.py
+Environment=HOME=@HOME@
+Environment=PATH=@HOME@/.local/bin:@HOME@/.local/share/pnpm:/usr/local/bin:/usr/bin:/bin
+Environment=MEETING_SCRIBE_PORT=@PORT@
+# 家目錄唯讀：Claude Code 不自動更新、不送遙測（CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC 涵蓋 auto-updates）
+Environment=CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+# CLAUDE_CODE_OAUTH_TOKEN（`claude setup-token` 產生，一年效期）放這裡；root 600，由 systemd 讀了交給服務
+EnvironmentFile=-/etc/meeting-scribe/env
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@HOME@/.config/meeting-scribe @HOME@/.local/share/meeting-scribe @HOME@/.claude @HOME@/.claude.json @HOME@/.codex
+ReadWritePaths=-@HOME@/.cache
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+CapabilityBoundingSet=
+AmbientCapabilities=
+# 不設 RestrictNamespaces 與 MemoryDenyWriteExecute：Codex 的唯讀沙盒要用 namespace，Node（Claude Code）要 JIT
+MemoryMax=4G
+TasksMax=512
+
+[Install]
+WantedBy=multi-user.target

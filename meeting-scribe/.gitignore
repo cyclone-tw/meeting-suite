@@ -1,0 +1,14 @@
+.DS_Store
+__pycache__/
+*.pyc
+.env
+*.key
+data/
+*.log
+*.pcm
+*.aiff
+*.wav
+
+# impeccable 審查截圖（含示範畫面，不進版控）
+.impeccable/review/
+.impeccable/questions/

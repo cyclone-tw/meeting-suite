@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Cyclone Scribe">
+  <rect width="512" height="512" rx="112" fill="#2f6f5e"/>
+  <rect x="198" y="92" width="116" height="200" rx="58" fill="#ffffff"/>
+  <path d="M144 236a112 112 0 0 0 224 0" fill="none" stroke="#ffffff" stroke-width="34" stroke-linecap="round"/>
+  <path d="M256 350v62M194 414h124" fill="none" stroke="#ffffff" stroke-width="34" stroke-linecap="round"/>
+  <circle cx="396" cy="118" r="40" fill="#ff5446" stroke="#2f6f5e" stroke-width="14"/>
+</svg>

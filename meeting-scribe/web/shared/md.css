@@ -1,0 +1,25 @@
+/* 共用元件（meeting-scribe#157）：MdView 排版的樣式，App 與字幕工作室共用。
+   顏色用兩邊都有的變數，沒有時用中性的預設值；每條規則都以 .md- 開頭。 */
+.md-view { line-height:1.7; font-size:15px; color:inherit; overflow-wrap:anywhere; }
+.md-view .md-h { margin:1.1em 0 .45em; line-height:1.35; font-weight:700; }
+.md-view .md-h1 { font-size:1.3em; }
+.md-view .md-h2 { font-size:1.18em; }
+.md-view .md-h3 { font-size:1.06em; }
+.md-view .md-h4, .md-view .md-h5, .md-view .md-h6 { font-size:1em; }
+.md-view .md-p { margin:.5em 0; }
+.md-view .md-list { margin:.4em 0; padding-left:1.4em; }
+.md-view .md-list li { margin:.2em 0; }
+.md-view .md-list .md-list { margin:.15em 0; }
+.md-view .md-code { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.9em; padding:.1em .35em; border-radius:5px; background:var(--surface-2, rgba(127,127,127,.15)); }
+.md-view .md-pre { margin:.6em 0; padding:10px 12px; border-radius:8px; background:var(--surface-2, rgba(127,127,127,.12)); overflow:auto; font-size:.88em; line-height:1.5; }
+.md-view .md-pre code { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; white-space:pre; }
+.md-view .md-quote { margin:.6em 0; padding:.1em 0 .1em 12px; border-left:3px solid var(--accent, rgba(127,127,127,.5)); color:var(--muted, inherit); }
+.md-view .md-hr { border:0; border-top:1px solid var(--line, rgba(127,127,127,.3)); margin:1em 0; }
+.md-view .md-link { color:var(--accent, #2f6f5e); text-decoration:underline; text-underline-offset:2px; }
+.md-view .md-table-wrap { margin:.6em 0; overflow-x:auto; }
+.md-view .md-table { border-collapse:collapse; font-size:.95em; min-width:50%; }
+.md-view .md-table th, .md-view .md-table td { border:1px solid var(--line, rgba(127,127,127,.3)); padding:5px 9px; vertical-align:top; }
+.md-view .md-table th { background:var(--surface-2, rgba(127,127,127,.1)); font-weight:600; }
+/* 首尾不留白：放最後、加重 specificity，蓋過上面各區塊的 margin */
+.md-view > :first-child:first-child { margin-top:0; }
+.md-view > :last-child:last-child { margin-bottom:0; }

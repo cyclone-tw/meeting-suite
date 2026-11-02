@@ -1,0 +1,34 @@
+{
+  "description": "Copy to ~/.config/recording-transcriber/asr-profile.json and keep only the keys you use. Every key is optional; a missing key turns that feature off.",
+  "vocabulary": {
+    "Cloud Code": "Claude Code",
+    "Chat GBT": "ChatGPT"
+  },
+  "shared_vocabulary": {
+    "paths": [
+      "Documents/notes/transcription-vocabulary.md"
+    ],
+    "repo": "Documents/notes",
+    "wiki_path": "transcription-vocabulary.md"
+  },
+  "private_vocabulary": {
+    "paths": [
+      "Documents/private-vocabulary.md"
+    ]
+  },
+  "meeting_scribe_url": "https://scribe-host.example.ts.net:9443",
+  "meeting_scribe_standby_url": "",
+  "icloud_inbox": "Inbox",
+  "remote_host": "studio-mac",
+  "studio_drive": {
+    "account_suffix": "@example.com",
+    "folder": "My Drive/Meeting notes",
+    "label": "Google Drive"
+  },
+  "archive": {
+    "drive_mount": "Library/CloudStorage/GoogleDrive-you@example.com/My Drive",
+    "drive_prefix": "Archive/recording-transcripts/",
+    "icloud_prefix": "Archive/transcripts/"
+  },
+  "voice_memo_dir": "voice-memo-exports"
+}

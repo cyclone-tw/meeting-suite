@@ -1,0 +1,11 @@
+# 每 15 分鐘跑一次 meeting-scribe-wiki-pull.service（#120）；deploy/install-linux.sh 原樣安裝。
+[Unit]
+Description=meeting-scribe: pull student data every 15 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

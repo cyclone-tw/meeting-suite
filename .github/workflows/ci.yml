@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ffmpeg
+        run: brew install ffmpeg
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: recording-transcriber/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: recording-transcriber/pnpm-lock.yaml
+      - name: recording-transcriber
+        working-directory: recording-transcriber
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm test
+      - name: meeting-scribe
+        working-directory: meeting-scribe
+        run: python3 -m unittest discover -s tests

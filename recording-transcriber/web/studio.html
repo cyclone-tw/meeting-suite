@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cyclone 字幕工作室</title>
+<link rel="icon" href="/app-icon.png">
+<meta name="studio-token" content="__STUDIO_TOKEN__">
+<meta name="studio-features" content="__STUDIO_FEATURES__">
+<link rel="stylesheet" href="/studio.css">
+<!-- 會議轉錄 App 的共用元件（#111）：從這台的 meeting-scribe checkout 讀同一份 -->
+<link rel="stylesheet" href="/shared/md.css">
+<link rel="stylesheet" href="/shared/ext.css">
+<link rel="stylesheet" href="/shared/mindmap.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 5v14l12-7z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M6 5v14M18 6l-9 6 9 6z"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M18 5v14M6 6l9 6-9 6z"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol>
+  <symbol id="i-fwd" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 010 12h-3"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></symbol>
+  <symbol id="i-fire" viewBox="0 0 24 24"><path d="M4 6h16v12H4z"/><path d="M8 14h8"/></symbol>
+  <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3v8"/><path d="M6.3 7.3a8 8 0 1011.4 0"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M5 4.5A1.5 1.5 0 016.5 3H19v15H6.5A1.5 1.5 0 005 19.5z"/><path d="M5 19.5A1.5 1.5 0 006.5 21H19v-3"/><path d="M9 7h6"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 15V4"/><path d="M7 9l5-5 5 5"/><path d="M4 15v4a1 1 0 001 1h14a1 1 0 001-1v-4"/></symbol>
+</svg>
+
+<header>
+  <button class="btn ghost" id="homeBtn" hidden aria-label="回到所有影片"><svg class="icon"><use href="#i-back"/></svg>所有影片</button>
+  <span id="appName"><img src="/app-icon.png" alt=""><span class="app-label">Cyclone 字幕工作室</span></span>
+  <span id="projName"></span>
+  <span class="badge warn" id="privBadge" hidden>含個資</span>
+  <ol id="steps" aria-label="步驟">
+    <li data-s="1"><b>1</b><span>選影片</span></li>
+    <li data-s="2"><b>2</b><span>預覽粗剪</span></li>
+    <li data-s="3"><b>3</b><span>自動辨識校對</span></li>
+    <li data-s="4"><b>4</b><span>看影片改字幕</span></li>
+    <li data-s="5"><b>5</b><span>輸出影片</span></li>
+  </ol>
+  <span id="saveNote" aria-live="polite"></span>
+  <span class="hdr-right">
+    <button class="btn solid" id="burnOpen" hidden><svg class="icon"><use href="#i-fire"/></svg>輸出影片</button>
+    <button class="btn" id="ytOpen" hidden title="上傳到 YouTube（需要的影片會先自動輸出）"><svg class="icon"><use href="#i-upload"/></svg><span class="yt-label-long">上傳 </span>YouTube</button>
+    <button class="btn ghost" id="wikiOpen" hidden title="把字幕和說明欄整理成交接單，放到 iCloud 共用資料夾的 to-wiki，交給 coding agent 整理成筆記" aria-label="交給 agent 寫 wiki"><svg class="icon"><use href="#i-book"/></svg><span class="wiki-label">交給 agent 寫 wiki</span></button>
+    <button class="btn ghost" id="settingsBtn" title="設定（YouTube 頻道、講者名冊）" aria-label="設定"><svg class="icon"><use href="#i-gear"/></svg><span class="hdr-label">設定</span></button>
+    <button class="btn ghost" id="quitBtn" title="關閉字幕工作室（背景的服務也一起停掉）"><svg class="icon"><use href="#i-power"/></svg><span class="quit-label">關閉工作室</span></button>
+  </span>
+</header>
+
+<div id="alert" role="alert" hidden><span id="alertText"></span><button class="btn sm" id="alertClose">知道了</button></div>
+<div id="toast" role="status" hidden></div>
+
+<!-- 首頁 -->
+<section id="home" class="page wide" hidden>
+  <div class="card">
+    <h1>要幫哪支影片上字幕？</h1>
+    <p class="muted" style="margin:0">點一支影片先預覽、把不要的段落剪掉，再自動辨識、只修錯字不改寫，邊看影片邊微調，最後輸出影片，或直接上傳 YouTube。</p>
+
+    <ul id="videoList" style="margin-top:18px"></ul>
+    <p class="hint" id="videoEmpty" hidden>「影片」、「桌面」、「下載」（和設定的 iCloud 共用資料夾）裡沒有找到影片。</p>
+    <p class="hint" id="videoNote" hidden>標「iCloud」的影片放在 iCloud 共用資料夾的 studio，每台 Mac 都看得到；做好的檔案也會放在旁邊，一起同步。</p>
+    <div class="pick-row">
+      <button class="btn" id="pickBtn"><svg class="icon"><use href="#i-folder"/></svg>從 Finder 選…</button>
+      <input class="text-in" id="pathIn" placeholder="或貼上影片的完整路徑（Finder 選檔後按 ⌥⌘C 複製路徑），按 Enter" autocomplete="off">
+      <button class="btn" id="pathGo" disabled>預覽</button>
+    </div>
+    <!-- 外語影片做雙語字幕（#56）：貼 YouTube 網址下載 -->
+    <div class="pick-row" id="ytRow">
+      <input class="text-in" id="ytUrl" placeholder="或貼上 YouTube 網址：下載外語影片，做中文或雙語字幕" autocomplete="off" spellcheck="false">
+      <select class="text-in" id="ytLangSel" aria-label="影片說的語言" style="flex:none;width:auto"><option value="">自動判斷語言</option><option value="en">英文</option><option value="ja">日文</option><option value="ko">韓文</option><option value="zh">中文</option></select>
+      <button class="btn" id="ytGo" disabled>下載並上字幕</button>
+    </div>
+    <p class="hint" id="ytHint">作者有上傳字幕就直接用，沒有才用 Soniox 辨識；再請 Claude 逐句翻成台灣繁中。下載的影片放在「影片／YouTube 下載」，只給自己看、做筆記用。</p>
+    <div id="importBox" hidden>
+      <div class="imp-head"><b id="impTitle">讀取影片資訊…</b><button class="btn sm" id="impCancel">停止</button></div>
+      <progress id="impBar" max="1" value="0"></progress>
+      <p class="hint" id="impStep" style="margin:4px 0 0"></p>
+    </div>
+  </div>
+
+  <div class="card" id="projCard" hidden>
+    <h2>繼續編輯</h2>
+    <ul id="projList"></ul>
+  </div>
+</section>
+
+<!-- 預覽與粗剪（recording-transcriber#4）-->
+<section id="trim" hidden>
+  <div id="tLeft">
+    <div id="pStageWrap"><div id="pStage"><video id="pvideo" preload="auto" playsinline></video></div></div>
+    <div class="transport">
+      <button class="btn" id="pBack" title="退 1 秒（←；⇧← 退 5 秒）">−1 秒</button>
+      <button class="btn solid" id="pPlay" aria-label="播放" title="播放／暫停（空白鍵）"><svg class="icon"><use href="#i-play"/></svg></button>
+      <button class="btn" id="pFwd" title="進 1 秒（→；⇧→ 進 5 秒）">+1 秒</button>
+      <span class="time" id="pTime">0:00.0</span>
+      <span class="spacer"></span>
+      <label class="muted chk"><input type="checkbox" id="pSkip" checked>播放時跳過剪掉的部分</label>
+    </div>
+    <div class="tl" id="tl" aria-label="時間軸：拖拉選一段，點剪掉的區段可以恢復">
+      <div class="tl-scroll"><div class="tl-inner">
+        <div class="tl-view"><canvas class="tl-thumbs"></canvas><canvas class="tl-wave"></canvas></div>
+        <div class="tl-cuts"></div><div class="tl-sel" hidden></div><div class="tl-mark" hidden></div><div class="tl-head"></div>
+      </div></div>
+      <div class="tl-foot"><span>0:00</span><span class="muted" id="tlHint">拖拉選一段 → 按「剪掉選取的範圍」；點紅色的區段可以恢復</span><span id="tlEnd"></span></div>
+    </div>
+    <div class="cut-tools" id="cutTools">
+      <span class="grp"><button class="btn sm" id="markIn" title="把目前位置設成選取的起點（I）">起點 I</button><button class="btn sm" id="markOut" title="把目前位置設成選取的終點（O）">終點 O</button></span>
+      <button class="btn sm solid" id="cutSel" disabled title="剪掉選取的範圍（X）">剪掉選取的範圍</button>
+      <button class="btn sm" id="cutHead" title="把影片開頭到目前位置剪掉">剪掉開頭到這裡</button>
+      <button class="btn sm" id="cutTail" title="把目前位置到影片結尾剪掉">剪掉這裡到結尾</button>
+      <button class="btn sm" id="cutSilence" title="在這台電腦上找超過 2 秒的靜音，前後各留 0.3 秒後剪掉（不送雲端）">剪掉長時間的靜音</button>
+      <span class="spacer"></span>
+      <span class="grp"><button class="btn sm" id="zoomOut" aria-label="縮小時間軸">−</button><span id="zoomLabel">整支</span><button class="btn sm" id="zoomIn" aria-label="放大時間軸">+</button></span>
+      <button class="btn sm" id="tUndo" disabled title="復原（⌘Z）"><svg class="icon"><use href="#i-undo"/></svg>復原</button>
+    </div>
+    <div id="cutNote" hidden></div>
+    <div class="keys" id="trimKeys"><span><kbd>空白</kbd> 播放／暫停</span><span><kbd>←</kbd><kbd>→</kbd> 一秒</span><span><kbd>⇧</kbd>+<kbd>←</kbd><kbd>→</kbd> 五秒</span><span><kbd>I</kbd><kbd>O</kbd> 起點、終點</span><span><kbd>X</kbd> 剪掉選取的範圍</span><span><kbd>Esc</kbd> 取消選取</span><span><kbd>⌘Z</kbd> 復原</span></div>
+  </div>
+
+  <aside id="tRight">
+    <h2 id="tName" style="font-size:18px;word-break:break-all"></h2>
+    <p class="muted" id="tMeta" style="margin:0;font-size:13px"></p>
+    <div id="tExisting" hidden><span id="tExistingText">這支影片之前做過字幕，不用重新辨識。</span><button class="btn sm solid" id="tOpenExisting">打開上次的專案</button></div>
+    <div id="tStartBox">
+      <div class="sum" id="tSum"></div>
+      <ol id="cutList"></ol>
+      <div class="q"><b>?</b>影片說的是哪種語言…</div>
+      <select class="text-in" id="langSel" aria-label="影片說的語言">
+        <option value="zh">中文（一般字幕）</option><option value="en">英文（翻成中文、可做雙語）</option><option value="ja">日文（翻成中文、可做雙語）</option><option value="ko">韓文（翻成中文、可做雙語）</option>
+      </select>
+      <p class="hint" id="langHint" hidden>外語影片會用 Soniox 辨識原文，再請 Claude 逐句翻成台灣繁中；編輯時可以切換中文、原文或雙語。</p>
+      <div class="q"><b>!</b>這支影片有沒有個資…</div>
+      <div class="seg-ctl" role="group" aria-label="是否含個資" id="privSeg">
+        <button type="button" data-v="public" aria-pressed="false">沒有個資</button>
+        <button type="button" data-v="student-private" aria-pressed="false">含個資</button>
+      </div>
+      <p class="hint" id="privHint">含個資的影片不能交給可能走中國大陸雲端模型的 agent 校對（目前是 pi）。</p>
+      <details class="adv" id="adv">
+        <summary>進階：換別的 coding agent 校對</summary>
+        <p class="hint">標成含個資時，可能走中國大陸雲端模型的 agent 會被停用。</p>
+        <div class="seg-ctl" role="group" aria-label="校對 agent" id="proofSeg" style="margin-top:8px"></div>
+      </details>
+      <div class="q"><b>+</b>有沒有 Discord 分軌（標出誰在講）…</div>
+      <div id="trkBox">
+        <p class="hint" id="trkFound" style="margin:0"></p>
+        <div class="names-actions"><button type="button" class="btn sm" id="trkPick">選 zip…</button><button type="button" class="btn sm ghost" id="trkClear" hidden>不用分軌</button></div>
+        <div id="trkBody" hidden>
+          <div class="trk-known" id="trkKnown" hidden></div>
+          <table class="trk-table"><thead><tr><th>Discord 帳號</th><th>字幕上的名字</th></tr></thead><tbody id="trkRows"></tbody></table>
+          <label class="chk"><input type="checkbox" id="trkFill" checked>補回影片裡沒錄到的聲音（自動偵測，例如 OBS 沒收到麥克風）</label>
+          <p class="hint">字幕做好後，換人講話的那句前面會加「【名字】」。名字記下來，下次同一群人自動帶入。</p>
+        </div>
+      </div>
+      <div class="start-row">
+        <button class="btn solid big" id="startBtn" disabled>開始上字幕</button>
+        <span class="hint" id="costHint" style="margin:0"></span>
+      </div>
+    </div>
+  </aside>
+</section>
+
+<!-- 已關閉 -->
+<section id="closed" class="page" hidden>
+  <div class="card">
+    <h1>字幕工作室已經關閉</h1>
+    <p class="muted" style="margin:6px 0 0">可以關掉這個分頁了。要再用時，點 Dock 或「應用程式」裡的「字幕工作室」。</p>
+  </div>
+</section>
+
+<!-- 處理中 -->
+<section id="processing" class="page" hidden>
+  <div class="card">
+    <h1 id="procTitle">正在自動辨識與校對</h1>
+    <p class="muted" id="procSub" style="margin:0">做完會自動進入下一步，可以先去忙別的。</p>
+    <ol id="procSteps">
+      <li data-k="preview"><i></i>準備預覽用的影片</li>
+      <li data-k="tracks"><i></i>對齊 Discord 分軌</li>
+      <li data-k="fill"><i></i>補回沒錄到的聲音</li>
+      <li data-k="extract"><i></i>抽出聲音</li>
+      <li data-k="asr"><i></i>雲端辨識（Soniox，取回後立刻刪除雲端副本）</li>
+      <li data-k="proofread"><i></i>AI 逐字校對（只修錯字）</li>
+      <li data-k="describe"><i></i>寫 YouTube 說明欄</li>
+      <li data-k="speakers"><i></i>標上講者</li>
+    </ol>
+    <p class="muted" id="procElapsed"></p>
+    <div id="procRun"><button class="btn" id="procStop">停止</button></div>
+    <div id="procFail" hidden>
+      <p style="color:var(--warn);font-weight:600" id="procError"></p>
+      <div style="display:flex;gap:8px"><button class="btn solid" id="retryBtn">重試</button><button class="btn" id="procHome">回到所有影片</button></div>
+    </div>
+  </div>
+</section>
+
+<!-- 編輯 -->
+<section id="editor" hidden>
+  <div id="left">
+    <div id="stageWrap"><div id="stage"><video id="video" preload="auto" playsinline></video><div id="overlay" aria-hidden="true"></div></div></div>
+    <div class="scrub-wrap" hidden><input type="range" id="scrub" min="0" max="1000" value="0" step="1" aria-label="播放位置"><div id="scrubCuts" aria-hidden="true"></div></div>
+    <div class="tl" id="etl" aria-label="時間軸：點一下跳過去，拖拉選一段，點剪掉的區段可以恢復">
+      <div class="tl-scroll"><div class="tl-inner">
+        <div class="tl-view"><canvas class="tl-thumbs"></canvas><canvas class="tl-wave"></canvas></div>
+        <div class="tl-hints"></div><div class="tl-cuts"></div><div class="tl-sel" hidden></div><div class="tl-mark" hidden></div><div class="tl-head"></div>
+      </div></div>
+      <div class="tl-foot"><span>0:00</span><span class="muted">拖拉選一段可以剪掉；點紅色的區段可以恢復</span><span id="etlEnd"></span></div>
+    </div>
+    <div class="cut-tools" id="eCutTools">
+      <span class="grp"><button class="btn sm" id="eMarkIn" title="把目前位置設成選取的起點（I）">起點 I</button><button class="btn sm" id="eMarkOut" title="把目前位置設成選取的終點（O）">終點 O</button></span>
+      <button class="btn sm solid" id="eCutSel" disabled title="剪掉選取的範圍（X）">剪掉選取的範圍</button>
+      <label class="muted chk"><input type="checkbox" id="eSkip" checked>播放時跳過剪掉的部分</label>
+      <span class="spacer"></span>
+      <span class="grp"><button class="btn sm" id="eZoomOut" aria-label="縮小時間軸">−</button><span id="eZoomLabel">整支</span><button class="btn sm" id="eZoomIn" aria-label="放大時間軸">+</button></span>
+    </div>
+    <div id="eCutNote" class="cut-note" hidden></div>
+    <div class="transport">
+      <button class="btn" id="prevCue" title="上一句（↑）" aria-label="上一句"><svg class="icon"><use href="#i-prev"/></svg></button>
+      <button class="btn" id="frameBack" title="退一格（←）">◀ 1 格</button>
+      <button class="btn solid" id="playBtn" title="播放／暫停（空白鍵；打字時 ⌥ 空白）" aria-label="播放"><svg class="icon"><use href="#i-play"/></svg></button>
+      <button class="btn" id="frameFwd" title="進一格（→）">1 格 ▶</button>
+      <button class="btn" id="nextCue" title="下一句（↓）" aria-label="下一句"><svg class="icon"><use href="#i-next"/></svg></button>
+      <button class="btn" id="playCue" title="從這句開頭播到結尾（P）">播這一句</button>
+      <span class="time" id="timeNow">0:00.0</span>
+      <span class="spacer"></span>
+      <label class="muted" style="font-size:13px">速度
+        <select id="rate" class="btn sm"><option value="1">1×</option><option value="0.85">0.85×</option><option value="0.7">0.7×</option><option value="1.25">1.25×</option></select>
+      </label>
+      <button class="btn" id="undoBtn" title="復原（⌘Z）" disabled><svg class="icon"><use href="#i-undo"/></svg>復原</button>
+    </div>
+
+    <div id="cueCard">
+      <div id="cueBox">
+        <div id="cueHead"><b id="cueNo"></b><span id="cueTime"></span><span class="badge warn" id="cueLong" hidden>一行太長</span></div>
+        <input class="text-in" id="cueText" autocomplete="off" spellcheck="false" aria-label="這一句字幕">
+        <input class="text-in" id="cueTr" autocomplete="off" spellcheck="false" aria-label="這一句的中文譯文" placeholder="中文譯文（還沒翻）" hidden>
+        <div class="cue-tools">
+          <button class="btn sm" id="splitBtn" title="在游標的位置切成兩句">從游標處拆成兩句</button>
+          <button class="btn sm" id="mergeBtn">和下一句合併</button>
+          <button class="btn sm" id="delBtn">刪除這句</button>
+          <button class="btn sm" id="cutCueBtn" title="把這一句的畫面和聲音從影片剪掉（字幕也一起拿掉）">剪掉這一句</button>
+          <span class="grp"><span>開始</span><button class="btn" data-t="start" data-d="-100">−0.1</button><button class="btn" data-t="start" data-d="now">設為現在</button><button class="btn" data-t="start" data-d="100">+0.1</button></span>
+          <span class="grp"><span>結束</span><button class="btn" data-t="end" data-d="-100">−0.1</button><button class="btn" data-t="end" data-d="now">設為現在</button><button class="btn" data-t="end" data-d="100">+0.1</button></span>
+        </div>
+        <div id="aiNote" hidden></div>
+      </div>
+      <div id="gapNote" hidden><span>這段時間沒有字幕。</span><button class="btn sm" id="insertBtn">在這裡加一句</button></div>
+    </div>
+    <div class="keys"><span><kbd>I</kbd><kbd>O</kbd><kbd>X</kbd> 選一段剪掉</span><span><kbd>空白</kbd> 播放／暫停</span><span><kbd>⌥</kbd>+<kbd>空白</kbd> 打字時播放</span><span><kbd>←</kbd><kbd>→</kbd> 一格</span><span><kbd>⇧</kbd>+<kbd>←</kbd><kbd>→</kbd> 一秒</span><span><kbd>↑</kbd><kbd>↓</kbd> 上下句</span><span><kbd>Enter</kbd> 改完跳下一句</span><span><kbd>Esc</kbd> 離開輸入框</span></div>
+  </div>
+
+  <div id="right">
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected="true" data-tab="cuesPane" id="tabCues">字幕</button>
+      <button role="tab" aria-selected="false" data-tab="aiPane" id="tabAi">AI 剪輯</button>
+      <button role="tab" aria-selected="false" data-tab="descPane">YouTube 說明</button>
+      <button role="tab" aria-selected="false" data-tab="recapPane" id="tabRecap">會後總結</button>
+      <button role="tab" aria-selected="false" data-tab="mindPane" id="tabMind">心智圖</button>
+      <button role="tab" aria-selected="false" data-tab="extPane" id="tabExt">延伸</button>
+      <button role="tab" aria-selected="false" data-tab="corrPane" id="tabCorr">錯字表</button>
+    </div>
+    <div class="pane" id="cuesPane">
+      <!-- 外語影片（#56）：字幕顯示中文／原文／雙語，翻譯進度 -->
+      <div class="tools-row" id="langBar" hidden>
+        <div class="seg-ctl" role="group" aria-label="字幕顯示" id="langSeg">
+          <button data-m="zh" aria-pressed="false">中文</button><button data-m="orig" aria-pressed="false">原文</button><button data-m="both" aria-pressed="false">雙語</button>
+        </div>
+        <span class="muted" id="trStatus" style="font-size:13px"></span>
+        <span style="margin-left:auto;display:flex;gap:6px">
+          <button class="btn sm" id="trStop" hidden>停止翻譯</button>
+          <button class="btn sm" id="trBtn">翻譯…</button>
+        </span>
+      </div>
+      <div class="tools-row">
+        <div class="seg-ctl" role="group" aria-label="篩選" id="filterSeg">
+          <button data-f="all" aria-pressed="true">全部</button>
+          <button data-f="ai" aria-pressed="false">AI 改過</button>
+          <button data-f="long" aria-pressed="false">太長</button>
+        </div>
+        <label class="muted" style="font-size:13px;display:flex;gap:4px;align-items:center;margin-left:auto"><input type="checkbox" id="follow" checked>跟著播放捲動</label>
+        <div id="findRow">
+          <input class="text-in" id="findIn" placeholder="找字" autocomplete="off">
+          <input class="text-in" id="repIn" placeholder="取代成" autocomplete="off">
+          <button class="btn sm" id="repBtn" disabled>全部取代</button>
+          <button class="btn sm" id="namesOpen" aria-expanded="false" aria-controls="namesBox" title="用一句話告訴 AI 哪些人名、地名寫錯，一次改好">AI 更正名字</button>
+          <button class="btn sm" id="spkOpen" aria-expanded="false" aria-controls="spkBox" title="用 Discord 分軌標出每句是誰講的">講者</button>
+        </div>
+      </div>
+      <div id="namesBox" hidden>
+        <p class="hint" style="margin:0">用一句話告訴 AI 哪些人名、地名寫錯了，它會找出字幕裡的各種寫法（包括你沒想到的）。你勾選後才會改。</p>
+        <textarea id="namesIn" rows="2" maxlength="500" spellcheck="false" placeholder="例如：曉明、小明都是筱明" aria-label="哪些名字寫錯了"></textarea>
+        <div class="names-actions"><button class="btn sm solid" id="namesFind">請 AI 找出來</button><button class="btn sm" id="namesStop" hidden>停止</button><span class="muted" id="namesNote"></span></div>
+        <div id="namesResult" hidden>
+          <ol id="namesList"></ol>
+          <label class="chk"><input type="checkbox" id="namesCorr" checked>加入錯字表（以後轉錄都生效）</label>
+          <div class="names-actions"><button class="btn sm solid" id="namesApply">套用勾選的</button><button class="btn sm" id="namesCancel">取消</button></div>
+        </div>
+      </div>
+      <div id="spkBox" hidden>
+        <p class="hint" style="margin:0">用 Discord 分軌（Craig 下載的 zip）標出每句是誰講的：換人講話的那句前面會加「【名字】」，標錯的直接改字就好。</p>
+        <p class="muted" id="spkFound" style="margin:0;font-size:13px"></p>
+        <div class="trk-known" id="spkKnown" hidden></div>
+        <table class="trk-table" id="spkTable" hidden><thead><tr><th>Discord 帳號</th><th>字幕上的名字</th></tr></thead><tbody id="spkRows"></tbody></table>
+        <div class="names-actions"><button class="btn sm solid" id="spkApply" disabled>標上講者</button><button class="btn sm" id="spkPick">選 zip…</button><span class="muted" id="spkNote"></span></div>
+      </div>
+      <ol id="cueList"></ol>
+      <div id="listFoot"></div>
+      <div class="reproc-row"><button class="btn sm ghost" id="relayoutBtn" title="只重新斷句：不重新辨識、不跑 AI、不花錢">重新排字幕…</button><button class="btn sm ghost" id="reprocBtn" title="重新整理字幕的時間與斷句、重新校對">重新處理這支影片…</button></div>
+    </div>
+    <div class="pane" id="aiPane" hidden>
+      <div id="aiIntro">
+        <p style="margin:0 0 6px;font-weight:600">讓 AI 標出可以剪掉的地方</p>
+        <ul class="hint" style="margin:0;padding-left:18px">
+          <li>長時間的靜音、黑畫面：在這台電腦上找，不送雲端、不花錢。</li>
+          <li>講錯重講、整段贅詞、離題閒聊、等待：交給 <span id="aiWho">Claude</span> 看逐字稿判斷。</li>
+          <li>每一條都附理由，你確認後才會剪；套用後還是可以在時間軸上恢復。</li>
+        </ul>
+        <label class="chk" style="margin:10px 0"><input type="checkbox" id="aiUseAi" checked>也請 AI 看逐字稿（不勾就只找靜音和黑畫面）</label>
+        <button class="btn solid" id="aiFind">找出可以剪掉的地方</button>
+      </div>
+      <div id="aiRun" hidden>
+        <p id="aiStep" style="margin:0;font-weight:600"></p>
+        <p class="hint" id="aiElapsed"></p>
+        <button class="btn sm" id="aiStop">停止</button>
+      </div>
+      <div id="aiResult" hidden>
+        <div class="sum" id="aiSum"></div>
+        <div class="ai-actions">
+          <button class="btn solid" id="aiApplyRender" title="把勾選的建議剪掉，接著直接剪接＋燒字幕">套用勾選的，直接燒字幕</button>
+          <button class="btn" id="aiApply">套用勾選的</button>
+          <button class="btn ghost" id="aiDismiss">都不要</button>
+          <button class="btn ghost" id="aiAgain">重新找</button>
+        </div>
+        <label class="chk"><input type="checkbox" id="aiAll" checked>全選</label>
+        <ol id="aiList"></ol>
+      </div>
+    </div>
+    <div class="pane" id="descPane" hidden>
+      <p class="hint" style="margin:0">AI 依字幕寫的簡介、章節和每章重點，可以直接改；會自動存成 youtube-description.md。</p>
+      <textarea id="descText" spellcheck="false"></textarea>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn" id="copyDesc">複製全文</button><button class="btn" id="descRedo" title="依目前的字幕重新寫，字幕不會變動">重新寫說明欄…</button><button class="btn" id="descStop" hidden>停止</button><span class="muted" id="descCount" style="font-size:13px"></span></div>
+    </div>
+    <div class="pane" id="recapPane" hidden>
+      <p class="hint" style="margin:0" id="recapNote"></p>
+      <div class="seg-ctl" role="group" aria-label="會後總結的哪一頁" id="recapSeg"><button data-v="intro" aria-pressed="true">簡介</button><button data-v="full" aria-pressed="false">完整總結</button><button data-v="short" aria-pressed="false">短總結</button><button data-v="transcript" aria-pressed="false">逐字稿</button></div>
+      <textarea id="recapText" readonly spellcheck="false" aria-label="會後總結內容"></textarea>
+      <div id="recapRich" class="recap-rich" hidden></div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn solid" id="recapMake">產生會後總結</button><button class="btn" id="recapStop" hidden>停止</button><button class="btn" id="recapCopy">複製這頁</button><button class="btn" id="recapCopyAll">複製全部</button><button class="btn ghost" id="recapReveal" hidden>在 Finder 顯示 summary.md</button></div>
+      <div class="mod-row drive-row" id="driveRow_recap" hidden><span class="hint" style="margin:0" id="driveNote_recap"></span><button class="btn sm" id="driveOpen_recap" hidden>在 Finder 打開</button><button class="btn sm" id="driveRetry_recap" hidden>存到 Drive</button></div>
+    </div>
+    <!-- 心智圖（#101、#106）：App 的 mindmap 模組；主題在中間，議題往兩邊展開 -->
+    <div class="pane" id="mindPane" hidden>
+      <p class="hint" style="margin:0" id="mindNote"></p>
+      <div class="mod-row"><button class="btn solid" id="mindMake">產生心智圖</button><button class="btn" id="mindStop" hidden>停止</button><button class="btn ghost" id="mindReveal" hidden>在 Finder 顯示</button></div>
+      <!-- 圖、按鈕列（縮放、展開收合、深淺色、大畫面、編輯、複製 Mermaid、下載圖片、匯出 .opml）是會議轉錄 App 的共用元件 MindMap -->
+      <div class="mind-host" id="mindView" hidden></div>
+      <div class="mod-row drive-row" id="driveRow_mind" hidden><span class="hint" style="margin:0" id="driveNote_mind"></span><button class="btn sm" id="driveOpen_mind" hidden>在 Finder 打開</button><button class="btn sm" id="driveRetry_mind" hidden>存到 Drive</button></div>
+    </div>
+    <!-- 延伸（#88、#106）：App 的 markdown 模組，一個模組一個子頁籤 -->
+    <div class="pane" id="extPane" hidden>
+      <!-- 延伸頁籤是會議轉錄 App 的共用元件 ExtPanel（web/shared/ext.js），兩邊一模一樣 -->
+      <div id="extHost"></div>
+      <div class="mod-row drive-row" id="driveRow_ext" hidden><span class="hint" style="margin:0" id="driveNote_ext"></span><button class="btn sm" id="driveOpen_ext" hidden>在 Finder 打開</button><button class="btn sm" id="driveRetry_ext" hidden>存到 Drive</button></div>
+    </div>
+    <div class="pane" id="corrPane" hidden>
+      <p class="hint" style="margin:0" id="corrSrc">讀取中…</p>
+      <div class="add-row"><input class="text-in" id="corrWrong" placeholder="常被聽錯成" autocomplete="off"><input class="text-in" id="corrRight" placeholder="正確寫法" autocomplete="off"><button class="btn" id="corrAdd">加入</button></div>
+      <input class="text-in" id="corrFind" placeholder="在錯字表裡找" autocomplete="off">
+      <ul id="corrList"></ul>
+    </div>
+  </div>
+</section>
+
+<dialog id="burnDlg" aria-labelledby="burnTitle">
+  <h2 id="burnTitle" style="font-size:18px">把字幕燒進影片</h2>
+  <div id="burnSetup">
+    <div id="outBox">
+      <p class="hint" style="margin:0 0 8px">要輸出哪一種？</p>
+      <div class="seg-ctl" role="group" aria-label="輸出" id="outSeg" style="margin-bottom:14px">
+        <button data-o="burn" aria-pressed="true">字幕燒進畫面</button><button data-o="cut" aria-pressed="false">不燒字幕，另附字幕檔</button>
+      </div>
+    </div>
+    <p class="hint" style="margin:0 0 8px">字幕樣式與字級（影片上的字幕預覽會跟著變）</p>
+    <div class="seg-ctl" role="group" aria-label="字幕樣式" id="styleSeg" style="margin-bottom:8px">
+      <button data-s="box">圓角底框</button><button data-s="outline">白字黑邊</button>
+    </div>
+    <div class="seg-ctl" role="group" aria-label="字幕語言" id="burnLangSeg" style="margin-bottom:8px" hidden>
+      <button data-m="zh">中文</button><button data-m="orig">原文</button><button data-m="both">雙語</button>
+    </div>
+    <div class="seg-ctl" role="group" aria-label="字級" id="sizeSeg">
+      <button data-z="small">小</button><button data-z="medium">中</button><button data-z="large">大</button>
+    </div>
+    <p class="hint" id="burnWhere"></p>
+    <p class="hint" id="burnStale" style="color:var(--warn)" hidden>上次燒好之後字幕又改過，要再燒一次才會更新。</p>
+    <div class="shorts-entry">
+      <div><b>做成直式短片</b><p class="hint" style="margin:2px 0 0">從這支挑幾段 30–90 秒的精華，做成手機直式的短片（YouTube Shorts）。</p></div>
+      <button class="btn" id="shortsOpen">挑片段…</button>
+    </div>
+  </div>
+  <div id="burnRun" hidden>
+    <progress id="burnBar" max="1" value="0"></progress>
+    <p class="hint" id="burnPct"></p>
+  </div>
+  <p id="burnMsg" class="hint" hidden></p>
+  <div class="dlg-actions">
+    <button class="btn" id="revealSrt"><svg class="icon"><use href="#i-folder"/></svg>SRT 在 Finder 顯示</button>
+    <button class="btn" id="assExport" hidden title="圓角底框、中文在上原文在下；IINA、VLC 這類播放器可以外掛">匯出雙語 ASS 字幕檔</button>
+    <button class="btn" id="revealBurn" hidden><svg class="icon"><use href="#i-folder"/></svg>燒好的影片在 Finder 顯示</button>
+    <button class="btn" id="burnCancel" hidden>停止</button>
+    <button class="btn" id="burnClose">關閉</button>
+    <button class="btn solid" id="burnStart">開始燒字幕</button>
+  </div>
+</dialog>
+
+<dialog id="reprocDlg" aria-labelledby="reprocTitle">
+  <h2 id="reprocTitle" style="font-size:18px">重新處理這支影片？</h2>
+  <p class="hint" id="reprocCost"></p>
+  <p class="hint" id="reprocWhat"></p>
+  <div class="dlg-actions">
+    <button class="btn" id="reprocCancel">先不要</button>
+    <button class="btn solid" id="reprocGo">重新處理</button>
+  </div>
+</dialog>
+
+<dialog id="setDlg" aria-labelledby="setTitle">
+  <h2 id="setTitle" style="font-size:18px;margin-top:0">設定</h2>
+  <h3>YouTube 上傳</h3>
+  <div id="ytSetup" hidden>
+    <p class="hint" style="margin-top:0">每個人用自己的 Google Cloud 專案授權，工作室不會用到別人的帳號。第一次大約 15 分鐘，只要做一次：</p>
+    <ol class="guide">
+      <li>到 Google Cloud Console 建一個專案，啟用「YouTube Data API v3」。</li>
+      <li>設定 OAuth 同意畫面（使用者類型選「外部」），再按「發布應用程式」改成正式版。<b>停在「測試中」的話，授權 7 天就會過期。</b></li>
+      <li>建立 OAuth 用戶端 ID，應用程式類型選「電腦版應用程式」，下載 JSON 檔。</li>
+      <li>在下面選這個 JSON 檔，再按「連結 YouTube 頻道」。</li>
+    </ol>
+    <div class="dlg-actions" style="justify-content:flex-start">
+      <button class="btn" id="ytGuide">打開完整教學</button>
+      <button class="btn solid" id="ytPick">選 OAuth 用戶端 JSON 檔…</button>
+    </div>
+  </div>
+  <div id="ytReady" hidden>
+    <p class="hint" style="margin-top:0"><span id="ytClientInfo"></span> <button class="btn sm ghost" id="ytRepick">換一個 JSON 檔</button><button class="btn sm ghost" id="ytClientRemove">全部移除</button></p>
+    <ul id="ytChannels"></ul>
+    <p class="hint" id="ytNoChannel">還沒連結頻道。按下面的按鈕，會在瀏覽器打開 Google 的授權頁面；選要上傳的帳號或品牌頻道，按「允許」。</p>
+    <div class="dlg-actions" style="justify-content:flex-start;margin-top:12px">
+      <button class="btn solid" id="ytConnect">連結 YouTube 頻道</button>
+    </div>
+    <p class="hint" id="ytConnectNote" hidden>已經在瀏覽器打開 Google 的授權頁面，完成後這裡會自動出現頻道。沒有打開的話，<a id="ytConnectLink" target="_blank" rel="noopener">按這裡打開</a>。</p>
+  </div>
+  <input type="file" id="ytFile" accept=".json,application/json" hidden>
+  <h3>講者名冊</h3>
+  <p class="hint" style="margin-top:0">用 Discord 分軌標講者時，帳號會換成這裡的名字，每場會議自動帶入。改名後要到那支影片按「重新標講者」，已經標好的字幕才會跟著換。</p>
+  <table class="trk-table" id="rosterTable" hidden><thead><tr><th>Discord 帳號</th><th>字幕上的名字</th><th>最近出現</th><th></th></tr></thead><tbody id="rosterRows"></tbody></table>
+  <p class="hint" id="rosterEmpty" hidden>還沒有記過任何人。用 Discord 分軌標過講者，或在下面先加新成員。</p>
+  <div class="names-actions roster-add">
+    <input class="text-in" id="rosterUser" maxlength="64" placeholder="Discord 帳號" autocomplete="off" spellcheck="false" aria-label="新成員的 Discord 帳號">
+    <input class="text-in" id="rosterName" maxlength="12" placeholder="字幕上的名字" autocomplete="off" aria-label="新成員在字幕上的名字">
+    <button class="btn sm" id="rosterAdd">加進名冊</button>
+  </div>
+  <p class="muted" id="rosterNote" style="margin:4px 0 0;font-size:13px" aria-live="polite"></p>
+  <div class="dlg-actions"><button class="btn" id="setClose">關閉</button></div>
+</dialog>
+
+<dialog id="ytDlg" aria-labelledby="ytTitleH">
+  <h2 id="ytTitleH" style="font-size:18px;margin-top:0">上傳到 YouTube</h2>
+  <div id="ytNone" hidden>
+    <p class="hint">還沒有連結 YouTube 頻道。先到「設定」連結頻道，之後每次按一下就能上傳。</p>
+    <div class="dlg-actions" style="justify-content:flex-start"><button class="btn solid" id="ytToSettings">到設定連結頻道</button></div>
+  </div>
+  <div id="ytForm" hidden>
+    <div class="yt-addcc yt-again-cc" id="ytAgainCc" hidden><p class="hint">只想補上 CC 字幕的話，不用重傳影片：字幕會掛到 YouTube 上原本那支。</p><button class="btn solid" id="ytAgainCcBtn">只補上 CC 字幕</button></div>
+    <p class="hint warn-text" id="ytAgain" hidden></p>
+    <p class="hint warn-text" id="ytOthers" hidden></p>
+    <label class="field"><span>頻道</span><select id="ytChannel"></select></label>
+    <label class="field"><span>標題</span><input class="text-in" id="ytTitle" autocomplete="off"><small id="ytTitleCount"></small></label>
+    <label class="field"><span>說明欄（章節時間已經照剪輯換算）</span><textarea id="ytDesc" spellcheck="false"></textarea><small id="ytDescCount"></small></label>
+    <label class="field"><span>標籤（用逗號分開）</span><input class="text-in" id="ytTags" autocomplete="off"><small id="ytTagsHint"></small></label>
+    <div class="field"><span>誰看得到</span>
+      <div class="seg-ctl" role="group" aria-label="誰看得到" id="ytPrivacy"><button data-v="private">私人</button><button data-v="unlisted">不公開</button><button data-v="public">公開</button><button data-v="schedule">排程</button></div>
+      <input type="datetime-local" class="text-in" id="ytWhen" hidden aria-label="公開時間">
+    </div>
+    <div class="field"><span>字幕</span>
+      <div class="seg-ctl" role="group" aria-label="字幕" id="ytSubs"><button data-v="cc">CC 字幕（可開關）</button><button data-v="burned">燒在畫面上</button></div>
+      <label class="hint yt-alsocc" id="ytAlsoCcRow" hidden><input type="checkbox" id="ytAlsoCc" checked><span>也掛上 CC 字幕：YouTube 能搜尋影片裡說的話、自動翻譯，別人要引用內容也方便；觀眾通常要自己按 CC 才會看到</span></label>
+    </div>
+    <label class="field"><span>播放清單</span><select id="ytPlaylist"><option value="">不加入播放清單</option></select></label>
+    <details class="adv"><summary>更多設定</summary>
+      <div class="field-row">
+        <label class="field"><span>分類</span><select id="ytCategory"></select></label>
+        <label class="field"><span>影片語言</span><input class="text-in" id="ytLang" autocomplete="off" placeholder="zh-TW"></label>
+      </div>
+      <label class="check"><input type="checkbox" id="ytKids"><span>這是「為兒童打造」的影片（YouTube 規定要標示；會關掉留言等功能）</span></label>
+      <label class="check"><input type="checkbox" id="ytNotify"><span>公開時通知訂閱者</span></label>
+    </details>
+    <p class="hint" id="ytPlan"></p>
+  </div>
+  <div id="ytRun" hidden>
+    <ol id="ytSteps"></ol>
+    <progress id="ytBar" max="1" value="0"></progress>
+    <p class="hint" id="ytPct"></p>
+  </div>
+  <div id="ytResult" hidden></div>
+  <div class="dlg-actions">
+    <button class="btn" id="ytCancel" hidden>停止</button>
+    <button class="btn" id="ytClose">關閉</button>
+    <button class="btn solid" id="ytStart"><svg class="icon"><use href="#i-upload"/></svg>上傳</button>
+  </div>
+</dialog>
+
+<dialog id="shortsDlg" aria-labelledby="shortsTitle">
+  <h2 id="shortsTitle" style="font-size:18px;margin-top:0">做成直式短片</h2>
+  <p class="hint" style="margin-top:0">每段上方是標題、中間是影片（不裁切）、下方是大字幕，背景是影片模糊放大。先挑好片段，再一段一段輸出。</p>
+  <div class="sh-body">
+    <div class="sh-stage">
+      <div class="sh-frame" aria-label="直式預覽"><video id="shVideo" playsinline preload="metadata"></video><div id="shPrevTitle"></div><div id="shPrevSub"></div></div>
+      <p class="hint" id="shStageNote">按片段的「播放」，從頭播到尾預覽；剪掉的地方會跳過。</p>
+    </div>
+    <div class="sh-side">
+      <div id="shEmpty" hidden>
+        <p style="margin:0 0 4px;font-weight:600">還沒有片段</p>
+        <p class="hint" style="margin:0">可以請 AI 從字幕挑 3 到 5 段精華（大約一分鐘）；或在左邊的影片找到想要的地方，按「從目前位置加一段」。</p>
+      </div>
+      <div id="shBusy" hidden><i class="sh-spin" aria-hidden="true"></i><span id="shBusyText">AI 正在看字幕挑片段，大約一分鐘…</span><button class="btn sm" id="shStop">停止</button></div>
+      <ol id="shList"></ol>
+    </div>
+  </div>
+  <div class="dlg-actions">
+    <button class="btn" id="shAdd">從目前位置加一段</button>
+    <button class="btn" id="shAi">請 AI 挑精華</button>
+    <button class="btn solid" id="shClose">完成</button>
+  </div>
+</dialog>
+
+<dialog id="manageDlg" aria-labelledby="manageTitle">
+  <h2 id="manageTitle" style="font-size:18px">整理</h2>
+  <p class="hint" id="manageSize"></p>
+  <label class="hint" id="manageKeepRow" style="display:flex;gap:8px;align-items:flex-start"><input type="checkbox" id="manageKeep" checked><span>清掉前，把輸出的影片搬到原始影片旁邊保留<span id="manageOutputs"></span></span></label>
+  <label class="hint" id="manageVideoRow" style="display:flex;gap:8px;align-items:flex-start" hidden><input type="checkbox" id="manageVideo" checked><span>這支是從 YouTube 下載的，連下載的影片一起丟垃圾桶</span></label>
+  <label class="hint" id="manageOrigRow" style="display:flex;gap:8px;align-items:flex-start" hidden><input type="checkbox" id="manageOrig"><span>這支已經上傳到 YouTube，連原始錄影<span id="manageOrigSize"></span>一起丟垃圾桶。YouTube 上的是重新壓縮過的版本，之後想重剪或做短片就先留著。</span></label>
+  <p class="hint" id="manageCcWarn" style="color:var(--warn)" hidden>這支在 YouTube 上還沒有 CC 字幕。清掉之後就補不了，建議先打開這支，在「上傳 YouTube」按「只補上 CC 字幕」。</p>
+  <p class="hint" id="manageNote">清掉後整個資料夾會在垃圾桶，救得回來；原始影片不動。之後想再改這支的字幕，就要重新辨識（會再付一次辨識費）。</p>
+  <p class="hint" id="manageBusy" style="color:var(--warn)" hidden>這支還在處理，處理完才能清。</p>
+  <div class="dlg-actions">
+    <button class="btn" id="manageCancel">先不要</button>
+    <button class="btn" id="manageForget" title="檔案都留著，只是不在清單上">只移出清單</button>
+    <button class="btn solid" id="manageClear">清掉處理資料</button>
+  </div>
+</dialog>
+
+<dialog id="stopDlg" aria-labelledby="stopTitle">
+  <h2 id="stopTitle" style="font-size:18px">停止辨識與校對？</h2>
+  <p class="hint">已經送出的雲端辨識可能仍會計費；停止後會刪掉 Soniox 上的副本。</p>
+  <p class="hint">已經辨識好、存下來的結果會留著，之後按「重新開始」不用再付辨識費。</p>
+  <div class="dlg-actions">
+    <button class="btn" id="stopCancel">繼續跑</button>
+    <button class="btn solid" id="stopGo">停止</button>
+  </div>
+</dialog>
+
+<dialog id="quitDlg" aria-labelledby="quitTitle">
+  <h2 id="quitTitle" style="font-size:18px">還有工作在跑，確定要關閉嗎？</h2>
+  <ul id="quitBusy" class="hint" style="padding-left:20px"></ul>
+  <p class="hint">燒到一半的影片會停掉，下次再燒一次就好；辨識到一半的會停止，下次打開時按「重新開始」。</p>
+  <div class="dlg-actions">
+    <button class="btn" id="quitCancel">先不要</button>
+    <button class="btn solid" id="quitForce">仍要關閉</button>
+  </div>
+</dialog>
+
+<script type="module" src="/studio/libs.mjs"></script>
+<script defer src="/studio/common.js"></script>
+<script defer src="/studio/home.js"></script>
+<script defer src="/studio/timeline.js"></script>
+<script defer src="/studio/trim.js"></script>
+<script defer src="/studio/editor.js"></script>
+<script defer src="/studio/cues.js"></script>
+<script defer src="/studio/names.js"></script>
+<script defer src="/studio/speakers.js"></script>
+<script defer src="/studio/burn.js"></script>
+<script defer src="/studio/shorts.js"></script>
+<script defer src="/studio/youtube.js"></script>
+<script defer src="/shared/md.js"></script>
+<script defer src="/shared/icons.js"></script>
+<script defer src="/shared/ext.js"></script>
+<script defer src="/shared/mindmap.js"></script>
+<script defer src="/shared/recap-files.js"></script>
+<script defer src="/studio/recap.js"></script>
+<script defer src="/studio/mindmap.js"></script>
+<script defer src="/studio/main.js"></script>
+</body>
+</html>

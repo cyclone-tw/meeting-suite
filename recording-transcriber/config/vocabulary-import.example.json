@@ -1,0 +1,8 @@
+{
+  "description": "Review decisions for ZeroType imports (scripts/vocab-import-zerotype.mjs). skip: keys never imported, with the reason. rewrite: keys imported with a corrected target. reviewed_short_keys: short Chinese keys a person checked against the corpus before adding them to the profile.",
+  "skip": {
+    "GBT": "real acronym (gradient boosted trees)"
+  },
+  "rewrite": {},
+  "reviewed_short_keys": {}
+}

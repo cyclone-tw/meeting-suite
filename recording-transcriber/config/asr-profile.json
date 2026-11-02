@@ -1,0 +1,14 @@
+{
+  "profile_version": 2,
+  "description": "Generic ASR defaults. Your own values go in ~/.config/recording-transcriber/asr-profile.json, which overrides this file key by key; see config/asr-profile.example.json.",
+  "mlx_model": "mlx-community/whisper-large-v3-mlx",
+  "language": "auto",
+  "condition_on_previous_text": false,
+  "opencc": {
+    "enabled": true,
+    "from": "cn",
+    "to": "twp",
+    "note": "cn->twp runs only when the transcript language is Chinese (detected or forced)"
+  },
+  "vocabulary": {}
+}

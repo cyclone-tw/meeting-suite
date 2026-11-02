@@ -1,0 +1,11 @@
+meeting-suite
+Copyright (c) 2026 Cyclone
+
+程式碼依 LICENSE（MIT）授權。「Cyclone Scribe」「字幕工作室」的名稱與 Cyclone 的龍頭像不在 MIT 授權範圍內：
+修改後再發布請改用自己的名稱與圖示，不要讓人以為是 Cyclone 的官方版本。
+
+The code is licensed under the MIT License (see LICENSE). The names "Cyclone Scribe" and "字幕工作室"
+and Cyclone's dragon avatar are not licensed under it: if you publish a modified version, use your own
+name and icon so it is not mistaken for an official Cyclone release.
+
+Third-party components, models and services have their own terms; see THIRD_PARTY_NOTICES.md.
