@@ -48,7 +48,7 @@ brew install pipx && pipx install mlx-whisper
 | --- | --- | --- |
 | Soniox | [console.soniox.com](https://console.soniox.com/) 建立 API key | `security add-generic-password -s soniox-api-key -a "$USER" -w`（會提示貼上；兩個工具都讀這一份）。也可以放 `~/.config/meeting-scribe/soniox.key`（權限 600）或環境變數 `SONIOX_API_KEY` |
 | Claude Code | 上面的 `claude` 登入 | Claude Code 自己保管 |
-| YouTube 上傳（選用） | 自己的 Google Cloud 專案，步驟見 [`recording-transcriber/docs/youtube-setup.md`](recording-transcriber/docs/youtube-setup.md) | macOS 鑰匙圈（在字幕工作室「設定」裡連結） |
+| YouTube 上傳（選用） | 自己的 Google Cloud 專案建 OAuth 用戶端（電腦版應用程式），見下面「上傳 YouTube」 | macOS 鑰匙圈（在字幕工作室「設定」裡連結） |
 | Groq（選用，雲端 Whisper 備援） | [console.groq.com](https://console.groq.com/) | 環境變數 `GROQ_API_KEY`，或鑰匙圈服務 `groq-api-key` |
 | Apify（選用，抓沒有字幕的 YouTube） | [apify.com](https://apify.com/) | 環境變數 `APIFY_TOKEN` |
 
@@ -85,6 +85,49 @@ pnpm run studio:app           # 選用：做一個 ~/Applications/字幕工作�
 
 選影片 → 預覽剪頭尾 → 辨識與 AI 校對 → 編輯字幕、AI 剪輯建議、短影音 → 燒字幕或上傳 YouTube。只綁 127.0.0.1，每次啟動換一個 token。
 
+### 上傳 YouTube（選用）
+
+字幕工作室可以直接把影片、字幕和說明欄上傳到你的頻道。Google 規定上傳要用 OAuth 授權，不能只填 API key；用的是你自己的 Google Cloud 專案，repo 裡沒有任何人的帳號。第一次設定約 15 分鐘，完整步驟見 [`recording-transcriber/docs/youtube-setup.md`](recording-transcriber/docs/youtube-setup.md)：
+
+1. [Google Cloud Console](https://console.cloud.google.com/) 建一個專案，啟用 **YouTube Data API v3**。
+2. Google Auth Platform 設定同意畫面，目標對象選「外部」，再按「發布應用程式」改成正式版（停在測試中的話，授權 7 天就過期）。
+3. 建立 OAuth 用戶端，類型選 **電腦版應用程式**，下載 `client_secret_….json`。
+4. 字幕工作室「設定」→ 選這個 JSON 檔 →「連結 YouTube 頻道」，在瀏覽器授權。可以連好幾個頻道，各自設預設值（公開範圍、播放清單、分類…）。
+
+之後在編輯畫面按「上傳 YouTube」：可以掛 CC 字幕或上傳燒好字幕的版本、帶入 AI 寫好的說明欄（章節時間已照剪輯換算）、排程公開；上傳中斷會接著傳。工作室只把 client secret 與頻道授權存進 macOS 鑰匙圈，不另存檔案；匯入後可以刪掉下載的 JSON。每個 Google Cloud 專案每天最多上傳 100 支影片。
+
+### 存到 Google Drive（選用）
+
+下面四種存法都存到你自己的帳號：
+
+**會議 App：用 Google Drive 桌面版（建議）**
+
+1. 安裝 [Google Drive 桌面版](https://www.google.com/drive/download/)並登入，Finder 側邊欄會出現 Google Drive；實際位置是 `~/Library/CloudStorage/GoogleDrive-<你的帳號>/我的雲端硬碟`（英文介面是 `My Drive`）。
+2. 寫進 `~/.config/meeting-scribe/config.json`（可以列好幾個，例如個人與學校帳號）：
+
+   ```json
+   {
+     "drive_roots": {
+       "mine": { "label": "我的 Drive", "path": "~/Library/CloudStorage/GoogleDrive-you@example.com/我的雲端硬碟" }
+     }
+   }
+   ```
+
+   用 `deploy/install-macmini.sh` 安裝常駐服務時，加上 `MEETING_SCRIBE_DRIVE_ACCOUNT=you@example.com` 會自動寫好這一段（設定檔還不存在時才寫）。
+3. 會議 App「設定」→「存到 Drive 的預設」選位置、資料夾（預設「會議紀錄」）、要不要一併存音檔。開完會按「存到 Drive」，每場一個資料夾「日期 時間 會議名稱」，裡面是逐字稿、總結、會議紀錄、心智圖（.md、.svg、.opml）、表單 Word 檔與音檔，有產生的才存。存好後主機上的暫存自動刪除。
+
+**會議 App：網頁放在別台主機、用手機存**：主機上沒有 Google Drive 時，改由瀏覽器登入 Google、直接把檔案傳到 Drive（只申請 `drive.file`，看不到你 Drive 裡的其他檔案）。要自己建一個 Google OAuth 用戶端，步驟見 [`meeting-scribe/docs/drive-browser.md`](meeting-scribe/docs/drive-browser.md)。
+
+**字幕工作室：會後總結自動存一份**：產生會後總結、心智圖、延伸結果時，在背景複製一份到 Drive 的「<資料夾>/<日期 時分 名稱>」。寫進 `~/.config/recording-transcriber/asr-profile.json`：
+
+```json
+{ "studio_drive": { "account_suffix": "@example.com", "folder": "我的雲端硬碟/會議紀錄", "label": "我的 Drive" } }
+```
+
+`account_suffix` 是 Google 帳號的結尾，用來在 `~/Library/CloudStorage` 裡找對的那個 Drive；`folder` 是那個 Drive 底下的資料夾（要先存在）。沒設就不存，畫面也不顯示 Drive 那一行。
+
+**轉錄 CLI：歸檔**：`pnpm run archive <轉錄包> --dest <路徑>` 把轉錄包複製到 Drive（或 iCloud Drive），逐檔比對大小與 sha256 後才刪本機那份；目的地在 `asr-profile.json` 的 `archive`（`drive_mount`、`drive_prefix`、`icloud_prefix`），格式見 [`asr-profile.example.json`](recording-transcriber/config/asr-profile.example.json)。
+
 ### 指令
 
 ```bash
@@ -107,7 +150,7 @@ pnpm run speakers "影片.mp4" ~/Downloads/craig-….zip --name 帳號=名字   
 | 檔案 | 放什麼 | 範例 |
 | --- | --- | --- |
 | `~/.config/recording-transcriber/asr-profile.json` | 錯字對照、詞彙筆記位置、會議 App 網址、iCloud 共用資料夾、遠端 Mac、Drive 存檔與歸檔位置。沒設的功能就關著 | [`recording-transcriber/config/asr-profile.example.json`](recording-transcriber/config/asr-profile.example.json) |
-| `~/.config/meeting-scribe/config.json` | 會議 App 的「存到 Drive」根目錄（`drive_roots`）、詞彙筆記（`vocabulary_files`）、擴充包（`packs`）、主機名稱（`host_label`）等 | 擴充包格式見 [`meeting-scribe/docs/packs.md`](meeting-scribe/docs/packs.md) |
+| `~/.config/meeting-scribe/config.json` | 會議 App 的「存到 Drive」根目錄（`drive_roots`）或瀏覽器存檔（`drive_mode`、`google_client_id`）、詞彙筆記（`vocabulary_files`）、擴充包（`packs`）、主機名稱（`host_label`）等 | 擴充包格式見 [`meeting-scribe/docs/packs.md`](meeting-scribe/docs/packs.md) |
 | `~/.config/meeting-scribe/deploy.env` | 把會議 App 部署到別台主機時的主機與 Cloudflare 帳號（`deploy/deploy-all.sh` 讀） | 見 `meeting-scribe/deploy/deploy-all.sh` 開頭 |
 
 ## 授權與聲明

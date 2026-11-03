@@ -30,7 +30,8 @@ PULL_DIRS=()
 if [ -n "${MEETING_SCRIBE_PULL_DIRS:-}" ]; then
   # 空白、tab、換行都當分隔；不展開萬用字元
   IFS=$' \t\n' read -r -d '' -a PULL_DIRS <<< "${MEETING_SCRIBE_PULL_DIRS}" || true
-  for d in "${PULL_DIRS[@]}"; do
+  # ${arr[@]+...}：只有空白時陣列是空的，bash 3.2 在 set -u 下展開空陣列會報錯
+  for d in ${PULL_DIRS[@]+"${PULL_DIRS[@]}"}; do
     case "${d}" in /*) ;; *) echo "MEETING_SCRIBE_PULL_DIRS 要是絕對路徑：${d}" >&2; exit 1;; esac
     case "${d}" in *[!A-Za-z0-9._/-]*|*/../*|*/..) echo "MEETING_SCRIBE_PULL_DIRS 只能有英數與 . _ - /：${d}" >&2; exit 1;; esac
     [ "$(git -C "${d}" rev-parse --is-inside-work-tree 2>/dev/null)" = "true" ] || { echo "${d} 不是 git checkout（或擁有者不是 root，git 不信任）" >&2; exit 1; }

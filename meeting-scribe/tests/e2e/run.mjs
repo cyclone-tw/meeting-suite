@@ -1551,6 +1551,48 @@ print("\\n".join("".join(re.findall(r"<w:t(?: [^>]*)?>([^<]*)</w:t>", p)) for p 
     });
   },
 
+  // 依說明重整（#191）：開回一場已有結果與心智圖的會議 → 改會議說明 → 按兩次重整 → 全部段落帶新說明重送，
+  // 總結用整場重產、心智圖重產（舊的放進復原）；按一次只是確認
+  async "context-redo"() {
+    await withEnv(async ({ page: p, port }) => {
+      const id = "d".repeat(32);
+      const post = async (q, body) => {
+        const r = await fetch(`http://127.0.0.1:${port}${q}`, { method: "POST", headers: { "Content-Type": "application/json", "X-Meeting-Scribe": "1" }, body: JSON.stringify(body) });
+        assert(r.ok, `${q} ${r.status}`);
+      };
+      await post("/api/drafts/meta", { draft: id, meta: { title: "要重整的會議", place: "", engine: "soniox", started_at: Date.now(), duration_ms: 30000, state: "done", context: "舊說明" } });
+      await post("/api/drafts/finals", { draft: id, from: 0, tokens: [["主持人開場書上。", "1", 0, true], ["第一位分享。", "2", 10000, true], ["第二位分享書上。", "3", 20000, true]] });
+      await post("/api/drafts/ai", { draft: id, ai: { chunks: [
+        { idx: 1, start: 0, end: 0, text: "講者 1：主持人開場書上。", corrected: "舊一", summary: "舊重點一", seg: 0 },
+        { idx: 2, start: 10000, end: 10000, text: "講者 2：第一位分享。", corrected: "舊二", summary: "舊重點二", seg: 1 },
+        { idx: 3, start: 20000, end: 20000, text: "講者 3：第二位分享書上。", corrected: "舊三", summary: "舊重點三", seg: 2 }],
+        summary: { intro: "舊總結", full: "舊", short: "舊", chapters: [] }, mindmap: { center: "舊的心智圖", branches: [{ label: "舊議題", children: [] }] } } });
+      await p.go();
+      await p.until(`document.querySelectorAll("#recentList li").length > 0`, 10000);
+      await p.ev(`[...document.querySelectorAll("#recentList .btn")].find((b) => b.textContent === "開啟").click(); true`);
+      await p.until(`phase === "done" && chunks.size === 3 && mindmap?.center === "舊的心智圖"`, 10000);
+      assert(await p.ev(`meetingContext === "舊說明"`), "說明跟著暫存開回來");
+      await p.ev(`window._paras = []; window._f0 = window.fetch;
+        window.fetch = (u, o) => { if (String(u).includes("/api/agent/para")) _paras.push(JSON.parse(o.body)); return _f0(u, o); };
+        ctxOpen.click(); ctxText.value = "講者 1 是主持人小美，講者 2、3 輪流分享"; true`);   // 沒按「存好說明」就直接重整：用視窗裡的說明
+      assert(await p.ev(`!ctxRedo.hidden`), "會議結束、有暫存：可以依說明重整");
+      await p.ev(`ctxRedo.click(); true`);
+      assert(await p.ev(`/再按一次/.test(ctxRedo.textContent) && _paras.length === 0`), "按一次只是確認，還沒送");
+      await p.ev(`ctxRedo.click(); true`);
+      await p.until(`_paras.length === 3`, 10000);
+      assert(await p.ev(`_paras.every((x) => x.redo === true && x.backfill === true && x.context === "講者 1 是主持人小美，講者 2、3 輪流分享")`), "全部段落帶重整旗標與新說明");
+      await p.until(`!evtSrc && !!summary && summary.intro !== "舊總結" && [...chunks.values()].every((c) => c.corrected && !c.corrected.startsWith("舊"))`, 30000);
+      let saved;
+      for (let t = Date.now(); Date.now() - t < 10000; await sleep(250)) {
+        saved = (await (await fetch(`http://127.0.0.1:${port}/api/drafts/get?draft=${id}`)).json()).ai;
+        if (saved.summary?.whole && saved.summary.intro !== "舊總結") break;
+      }
+      assert(saved.summary?.whole && saved.summary.intro !== "舊總結", `總結要用整場重新產生並寫回暫存：${JSON.stringify(saved.summary).slice(0, 120)}`);
+      await p.until(`mindmap?.center === "IEP 會議" && !mapBusy`, 20000);
+      assert(await p.ev(`!!lastLive?.text`), "重整會更新即時摘要");
+    });
+  },
+
   // 拖檔案進畫面、用 Soniox 非即時（假的）：講者分開、停頓斷句；開始前以外的時候拖進來不會匯入（#90）
   async "import-soniox"() {
     await withEnv(async ({ page: p }) => {

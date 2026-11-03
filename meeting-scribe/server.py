@@ -2335,6 +2335,7 @@ class AgentSession:
         self.drafts = None
         self.draft = None
         self.backfill = False               # 補跑缺少的段落：不做即時摘要與議程判斷，收尾時用整場重新總結
+        self.redo = False                   # 依說明重整（#191）：全部段落重送，不拿舊重點當前文，即時摘要照常更新
         self.ended_at = None
         if self.fallback == "codex" and time.monotonic() < CLAUDE_DOWN[0]:
             self.engine = "codex"
@@ -2342,13 +2343,14 @@ class AgentSession:
         threading.Thread(target=self._run, daemon=True).start()
 
     # -- 對外 --
-    def bind_draft(self, drafts, draft, backfill=False):
+    def bind_draft(self, drafts, draft, backfill=False, redo=False):
         """第一次收到帶 draft 的段落時記下暫存（之後換別的 draft 不理）。補跑時先把已有段落的重點讀進來，
-        程序開起來時當前文補給它（跟程序重開時一樣）。"""
+        程序開起來時當前文補給它（跟程序重開時一樣）。依說明重整（redo）也是補跑的一種，但全部段落都重送：
+        舊重點是照舊說明寫的，不拿來當前文；即時摘要照常更新。"""
         if self.draft is not None or not isinstance(draft, str) or not MEETING_ID.match(draft):
             return
-        self.drafts, self.draft, self.backfill = drafts, draft, bool(backfill)
-        if self.backfill and not self.notes:
+        self.drafts, self.draft, self.backfill, self.redo = drafts, draft, bool(backfill or redo), bool(redo)
+        if self.backfill and not self.redo and not self.notes:
             try:
                 ai = drafts.get_ai(draft) or {}
             except (LookupError, ValueError, OSError):
@@ -2507,7 +2509,7 @@ class AgentSession:
                 # 排在前面的段落都做完了才會輪到這裡，所以看得到最後幾段有沒有進即時摘要。
                 # 總結包一定要在 close() 之前送：done 之後的事件會被丟掉
                 # 補跑缺少的段落只有零散幾段：不更新即時摘要、不判斷議程
-                if self.paras_since_live and not self.backfill:
+                if self.paras_since_live and (not self.backfill or self.redo):
                     self._guard("live", self._do_live)
                 if self.paras_since_agenda and not self.backfill:
                     self._guard("agenda", self._do_agenda)
@@ -2551,7 +2553,7 @@ class AgentSession:
         self.last_para_idx = idx
         self.paras_since_live += 1
         due = self.paras_since_live >= LIVE_EVERY_PARAS or self.clock() - self.last_live_at >= LIVE_EVERY_SECONDS
-        if due and not self.ending and not self.backfill and self.jobs.empty():
+        if due and not self.ending and (not self.backfill or self.redo) and self.jobs.empty():
             self._do_live()
         # 議程：每兩段判斷一次哪些項目談過；後面還有段落在排隊就先做段落，字幕整理不落後
         self.paras_since_agenda += 1
@@ -5175,7 +5177,7 @@ class Handler(BaseHTTPRequestHandler):
             if ctx is not None:      # 會議說明（#185）格式不對就不更新，段落照收
                 session.set_context(ctx)
         # draft：這場的會議暫存，結果由伺服器直接寫進去（#126）；seg 是這段最後一句在逐字稿的位置，重開時把重點貼回時間軸
-        session.bind_draft(self.drafts, body.get("draft"), backfill=body.get("backfill") is True)
+        session.bind_draft(self.drafts, body.get("draft"), backfill=body.get("backfill") is True, redo=body.get("redo") is True)
         start, end, seg = body.get("start"), body.get("end"), body.get("seg")
         queued = session.add_paragraph(idx, start if isinstance(start, int) else None, end if isinstance(end, int) else None, text,
                                        polish=body.get("polish") is True, seg=seg if _is_int(seg) and seg >= 0 else None)

@@ -662,6 +662,7 @@
   <label class="field"><span>會議說明</span><textarea id="ctxText" rows="5" maxlength="1000" placeholder="例如：主持人小美開場，四位老師輪流分享，每人約 10 分鐘，最後 Q&amp;A。"></textarea></label>
   <p id="ctxNote" class="help" aria-live="polite"></p>
   <div class="nf-btns"><button type="button" id="ctxSave" class="btn solid">存好說明</button><button type="button" id="ctxClose" class="btn">關閉</button></div>
+  <div class="nf-btns"><button type="button" id="ctxRedo" class="btn" hidden title="用現有的逐字稿照這份說明重新整理整場：段落重點、即時摘要、總結，產生過的心智圖也重產">依說明重整這場</button></div>
 </section>
 <div id="dock">
   <div id="caption" aria-live="off"><span class="idle">即時字幕</span></div>
@@ -1328,7 +1329,9 @@ function openEvents() {
       // 不是我們按結束的（例如超過 6 小時或伺服器重開）：這場的 AI 整理就停，字幕照常
       if (!aiEnded) { aiOn = false; setAiNote("AI 整理已停止（這場開太久或伺服器重開），字幕照常。", true); }
       if (aiEnded) forgetAiDraft();
+      if (redoMap) { redoMap = false; if (summary) genMindmap(); }   // 依說明重整：總結好了再重產心智圖（舊的放進復原）
       renderBackfill();
+      renderRedo();
     }
   };
 }
@@ -1438,10 +1441,13 @@ function renderBackfill() {
   b.hidden = !(n && draftId && phase === "done" && !recording && !importing && !evtSrc);
   b.textContent = `補跑缺少的段落（${n} 段）`;
 }
-async function backfillAi() {
-  const miss = missingChunks();
+// redo（#191）：依會議說明重整整場：全部段落都重送，總結出來後重產心智圖
+let redoMap = false;
+async function backfillAi({ redo = false } = {}) {
+  const miss = redo ? [...chunks.entries()].filter(([, c]) => (c.text || "").trim()).sort((a, b) => a[0] - b[0]) : missingChunks();
   if (!miss.length || !draftId || evtSrc || recording) return;
   $("aiBackfill").hidden = true;
+  redoMap = redo && Boolean(mindmap);
   // 新的整理程序，用量從零算：前面的併進 extraUsage
   extraUsage = addUsage(extraUsage, aiUsage); aiUsage = null;
   meetingId = newMeetingId(); aiRecovered = false; aiParaEpoch = ""; continuing = false;
@@ -1451,12 +1457,13 @@ async function backfillAi() {
   const mid = meetingId, did = draftId;
   rememberAiDraft(did);
   openEvents();
-  setAiNote(`補跑 ${miss.length} 段中，補完會用整場重新產生總結。可以關掉這頁，結果會自己存進暫存。`);
+  setAiNote(redo ? `依說明重整 ${miss.length} 段中，整理完會重新產生總結${redoMap ? "與心智圖" : ""}。可以關掉這頁，結果會自己存進暫存。`
+    : `補跑 ${miss.length} 段中，補完會用整場重新產生總結。可以關掉這頁，結果會自己存進暫存。`);
   let sent = 0, fail = "";
   for (const [idx, c] of miss) {
     if (!fail) {
       const r = await sendPara(mid, { meeting: mid, draft: did, idx, start: c.start ?? 0, end: c.end ?? 0, text: c.text, seg: c.lastSegIdx ?? null,
-        polish: $("polish").checked, backfill: true });
+        polish: $("polish").checked, backfill: true, context: meetingContext, ...(redo ? { redo: true } : {}) });
       if (mid !== meetingId) return;   // 等待期間換了一場
       if (r && r.ok) { sent++; continue; }
       fail = r ? ((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`) : "連不到伺服器";
@@ -1466,9 +1473,9 @@ async function backfillAi() {
   if (!sent) {
     // 一段都沒送進去（例如主機沒有 Claude）：不等事件，回到原本的樣子
     if (evtSrc) { evtSrc.close(); evtSrc = null; }
-    aiOn = false; aiResumed = false; sumPending = false; renderSummary();
+    aiOn = false; aiResumed = false; sumPending = false; redoMap = false; renderSummary();
     forgetAiDraft();
-    setAiNote("補跑失敗：" + fail, true);
+    setAiNote((redo ? "依說明重整失敗：" : "補跑失敗：") + fail, true);
     saveAiSoon();
     renderBackfill();
     return;
@@ -4451,9 +4458,34 @@ async function saveMeetingContext() {
   setMeetingContext($("ctxText").value);
   const ok = draftId ? await putDraftMeta(recording ? "recording" : "done") : true;
   $("ctxNote").textContent = (ok ? "存好了。" : "說明改好了，但暫存沒寫成功，稍後會再試。")
-    + (recording ? "下一段起 AI 就照新的說明整理。" : "重新產生總結或心智圖時就會照新的說明。");
+    + (recording ? "下一段起 AI 就照新的說明整理。" : "重新產生總結或心智圖時就會照新的說明；要整場重來就按「依說明重整這場」。");
+  renderRedo();
 }
-$("ctxOpen").onclick = () => ctxShow(true);
+// 依說明重整這場（#191）：會議結束、有暫存、沒有在整理時才有；要按兩次（會重跑整場、用到 Claude 額度）
+function redoCount() { return [...chunks.values()].filter((c) => (c.text || "").trim()).length; }
+function renderRedo() {
+  const b = $("ctxRedo");
+  b.hidden = !(redoCount() && draftId && phase === "done" && !recording && !importing && !evtSrc);
+  if (!b.dataset.armed) b.textContent = "依說明重整這場";
+}
+$("ctxRedo").onclick = () => {
+  const b = $("ctxRedo");
+  if (!b.dataset.armed) {
+    b.dataset.armed = "1";
+    b.textContent = `確定重整 ${redoCount()} 段？再按一次`;
+    $("ctxNote").textContent = "會照視窗裡的說明（先幫你存好）重跑整場的校正、段落重點、即時摘要與總結，段落結果會被新的蓋掉、不能復原；產生過心智圖也會重產（舊的可以按復原拿回來）。會用到 Claude 額度。";
+    clearTimeout(b._t);
+    b._t = setTimeout(() => { delete b.dataset.armed; renderRedo(); }, 5000);
+    return;
+  }
+  clearTimeout(b._t); delete b.dataset.armed;
+  // 視窗裡改了說明卻沒按「存好說明」：用視窗裡的那份（先存進暫存），不要拿舊的說明重跑整場
+  if ($("ctxText").value.replace(/\r\n/g, "\n").trim() !== meetingContext) { setMeetingContext($("ctxText").value); putDraftMeta(recording ? "recording" : "done"); }
+  ctxShow(false);
+  backfillAi({ redo: true }).catch((e) => setAiNote("依說明重整失敗：" + e.message, true)).finally(renderRedo);
+  renderRedo();
+};
+$("ctxOpen").onclick = () => { renderRedo(); ctxShow(true); };
 $("ctxClose").onclick = () => ctxShow(false);
 $("ctxSave").onclick = saveMeetingContext;
 $("ctxDlg").addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); ctxShow(false); } });

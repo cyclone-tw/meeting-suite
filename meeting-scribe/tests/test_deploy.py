@@ -78,7 +78,14 @@ class InstallPullDirsTest(unittest.TestCase):
         env.pop("MEETING_SCRIBE_PULL_DIRS", None)
         if value is not None:
             env["MEETING_SCRIBE_PULL_DIRS"] = value
-        return subprocess.run(["bash", "-c", self.block], env=env, capture_output=True, text=True)
+        runs = [subprocess.run([sh, "-c", self.block], env=env, capture_output=True, text=True) for sh in self.shells()]
+        # PATH 上的 bash 與 macOS 內建的 bash 3.2（GitHub Actions 的 macOS 用它）結果要一樣
+        self.assertTrue(all((r.returncode, r.stdout) == (runs[0].returncode, runs[0].stdout) for r in runs), [(r.returncode, r.stdout, r.stderr[-120:]) for r in runs])
+        return runs[0]
+
+    @staticmethod
+    def shells():
+        return ["bash"] + (["/bin/bash"] if Path("/bin/bash").exists() else [])
 
     def test_unset_means_nothing_to_do(self):
         for value in (None, "", "  "):

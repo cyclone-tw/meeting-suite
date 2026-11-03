@@ -110,10 +110,10 @@ class SessionDraftTest(unittest.TestCase):
         p.start()
         self.addCleanup(p.stop)
 
-    def make(self, mid=MID, backfill=False):
+    def make(self, mid=MID, backfill=False, redo=False):
         s = server.AgentSession(mid, command=FAKE)
         self.addCleanup(s.close)
-        s.bind_draft(self.store, DRAFT, backfill=backfill)
+        s.bind_draft(self.store, DRAFT, backfill=backfill, redo=redo)
         return s
 
     def ai(self):
@@ -173,6 +173,27 @@ class SessionDraftTest(unittest.TestCase):
         self.assertTrue(ai["summary"]["intro"].startswith("重產："), f"用整份暫存重新總結：{ai['summary']['intro']}")
         self.assertEqual([c["t_ms"] for c in ai["summary"]["chapters"]], [0, 5000], "章節對齊整份暫存的段落")
         self.assertEqual(ai["extra_usage"]["calls"], s.usage["calls"], "前一個程序的用量併進 extra_usage")
+
+    def test_redo_rewrites_every_paragraph_from_scratch_and_refreshes_the_live_summary(self):
+        """依說明重整（#191）：全部段落重送，不拿舊重點當前文（那是照舊說明寫的），也更新即時摘要。"""
+        self.store.merge_ai(DRAFT, {"chunks": [{"idx": 1, "text": "書上第一段", "corrected": "舊的一", "summary": "舊重點一"},
+                                               {"idx": 2, "text": "第二段", "corrected": "舊的二", "summary": "舊重點二"}],
+                                    "live": {"text": "舊的即時摘要"}}, "page")
+        r = self.make(MID2, redo=True)
+        self.assertEqual(r.notes, [], "重整不拿舊重點當前文")
+        self.assertTrue(r.backfill and r.redo)
+        r.set_context("主持人開場，兩位老師分享")
+        r.add_paragraph(1, 0, 900, "書上第一段")
+        r.add_paragraph(2, 5000, 5900, "第二段")
+        r.end()
+        until(lambda: r.closed)
+        types = [e["type"] for _, e in r.events]
+        self.assertIn("live", types, "重整會更新即時摘要")
+        ai = self.ai()
+        self.assertEqual([c["corrected"] for c in ai["chunks"]], ["學障第一段", "第二段"], "新結果蓋掉舊的")
+        self.assertFalse(ai["chunks"][0]["summary"].startswith("接續："), "第一題沒有舊前文")
+        self.assertNotEqual(ai["live"]["text"], "舊的即時摘要")
+        self.assertTrue(ai["summary"]["whole"])
 
     def test_partial_session_too_long_does_not_overwrite_summary(self):
         self.store.merge_ai(DRAFT, {"chunks": [{"idx": 1, "corrected": "前半" * 10}], "summary": {"intro": "前半場"}}, "page")
