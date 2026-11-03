@@ -16,6 +16,16 @@
 <title>Cyclone Scribe · 會議轉錄</title>
 <!-- 主題（#127）：預設暗色；選過亮色就記在這台瀏覽器。放在最前面，畫面才不會先閃一下暗色 -->
 <script>try { if (localStorage.getItem("ms.theme") === "light") document.documentElement.dataset.theme = "light"; } catch (e) { /* 讀不到就用暗色 */ }</script>
+<!-- 介面語言（#195）：選過就記在 ms.lang，沒選過看瀏覽器語言。英文時先藏起畫面，等靜態文字換好再顯示，免得先閃一下中文 -->
+<script src="/shared/i18n.js"></script>
+<script src="/shared/lang-en.js"></script>
+<script>
+const UI_LANG = MeetingI18n.pick((() => { try { return localStorage.getItem("ms.lang"); } catch (e) { return null; } })(), navigator.languages || [navigator.language]);
+const I18N = MeetingI18n.create(UI_LANG, [window.MeetingLangEN || {}]);
+const _ = I18N._;
+document.documentElement.lang = UI_LANG === "en" ? "en" : "zh-Hant";
+if (UI_LANG === "en") { document.documentElement.classList.add("i18n-wait"); setTimeout(() => document.documentElement.classList.remove("i18n-wait"), 3000); }
+</script>
 <script src="/vendor/opencc-js-1.0.5-full.js" defer onload="openccReady()"></script>
 <link rel="stylesheet" href="/shared/mindmap.css">
 <link rel="stylesheet" href="/shared/md.css">
@@ -100,6 +110,8 @@
   .meter i:nth-child(1) { --k:.6; } .meter i:nth-child(2) { --k:1; } .meter i:nth-child(3) { --k:1.5; } .meter i:nth-child(4) { --k:.9; }
   #micMeter { color:var(--accent); margin-left:8px; vertical-align:middle; }
   .bar-tools { display:flex; align-items:center; gap:4px; }
+  html.i18n-wait body { visibility:hidden; }
+  #langBtn { font-weight:600; letter-spacing:.02em; }
   .bar-tools .btn { min-height:36px; padding:4px 10px; font-size:14px; }
   @media (max-width:699px) { .bar-tools .wide-only { display:none !important; } }
   /* 「低調」一直帶字；較窄的桌機才把字幕外送按鈕縮成圖示（滑過有說明） */
@@ -480,6 +492,7 @@
     <button id="quietBtn" class="btn ghost" aria-pressed="false" title="低調畫面：只留紅點、計時與一行小字，桌上的人看不出內容" hidden><svg class="icon"><use href="#i-moon"/></svg><span class="lbl">低調</span></button>
     <button id="pipBtn" class="btn ghost wide-only" aria-pressed="false" title="把即時字幕開成浮在最上層的小視窗，切到別的分頁也看得到" hidden><svg class="icon"><use href="#i-pip"/></svg><span class="lbl">浮動字幕</span></button>
     <button id="overlayBtn" class="btn ghost wide-only" aria-pressed="false" title="在 MacBook 桌面顯示透明字幕（要先安裝「會議字幕」小程式），蓋在影片或任何 App 上" hidden><svg class="icon"><use href="#i-cc"/></svg><span class="lbl">桌面字幕</span></button>
+    <button id="langBtn" class="btn ghost" type="button" translate="no"></button>
     <button id="themeBtn" class="btn ghost" type="button" aria-label="改成亮色" title="改成亮色"><svg class="icon"><use href="#i-sun"/></svg></button>
     <button id="prefsBtn" class="btn ghost" aria-controls="prefs" aria-expanded="false" title="進階設定：專有名詞、存 Drive 的位置、繁體轉換"><svg class="icon"><use href="#i-gear"/></svg><span class="lbl">設定</span></button>
     <button id="sideToggle" class="btn ghost" aria-controls="side" aria-expanded="false" title="即時摘要、段落重點、會後總結" hidden><svg class="icon"><use href="#i-side"/></svg><span class="lbl">重點・總結</span></button>
@@ -497,7 +510,7 @@
           <p class="help" id="gdriveNote"></p>
           <p class="gdrive-btns"><button type="button" id="gdriveConnect" class="btn">連接 Google Drive</button> <button type="button" id="gdriveForget" class="btn ghost" hidden>中斷連線</button></p>
         </div>
-        <label class="field" style="margin:0"><span>資料夾</span><input type="text" id="saveFolder" class="text-in" placeholder="會議紀錄"></label>
+        <label class="field" style="margin:0"><span>資料夾</span><input type="text" id="saveFolder" class="text-in" placeholder="會議紀錄" translate="no"></label>
         <label class="check"><input type="checkbox" id="saveAudio" checked> 一併存音檔</label>
       </div>
       <label class="field"><span>專有名詞提示</span><textarea id="terms" rows="4"></textarea><small>一行一個，開始前改；人名、術語寫進來比較不會聽錯。</small></label>
@@ -747,6 +760,9 @@
   </div>
 </aside>
 <script>
+// 介面語言（#195）：靜態畫面先照字典換好，再讓其他程式讀畫面上的字
+I18N.translate(document.documentElement);
+document.documentElement.classList.remove("i18n-wait");
 const $ = (id) => document.getElementById(id);
 // 會後區塊標題的小圖示（#168）：圖從共用元件 MeetingIcons（web/shared/icons.js）拿，和字幕工作室同一組
 for (const slot of document.querySelectorAll("i[data-icon]")) {
@@ -757,7 +773,7 @@ for (const slot of document.querySelectorAll("i[data-icon]")) {
 const API_BASE = (document.querySelector('meta[name="scribe-api"]')?.content || "").trim().replace(/\/+$/, "");
 const api = (path) => API_BASE + path;
 // 頁面提示裡的主機名稱（#170）：主機在 /healthz 回自己的名稱（config 的 host_label），讀不到就說「主機」
-let hostName = "主機";
+let hostName = _("主機");
 function renderHostName() { for (const e of document.querySelectorAll(".hostName")) e.textContent = hostName; }
 const TARGET_RATE = 16000;
 let stream, displayStream, audioCtx, workletNode, wakeLock, startedAt, timer, flushPcm, recording = false;
@@ -778,12 +794,28 @@ function setTheme(t) {
   mapUI.setTheme(pageTheme());
 }
 function renderThemeBtn() {
-  const light = pageTheme() === "light", b = $("themeBtn"), label = light ? "改成暗色" : "改成亮色";
+  const light = pageTheme() === "light", b = $("themeBtn"), label = light ? _("改成暗色") : _("改成亮色");
   b.setAttribute("aria-label", label); b.title = label;
   b.querySelector("use").setAttribute("href", light ? "#i-moon" : "#i-sun");
 }
 $("themeBtn").onclick = () => setTheme(pageTheme() === "light" ? "dark" : "light");
 renderThemeBtn();
+// 介面語言（#195）：切換會重新載入頁面；錄音、匯入、AI 整理進行中不能切，免得中斷
+function renderLangBtn() {
+  const b = $("langBtn"), en = UI_LANG === "en";
+  b.textContent = en ? "中文" : "EN";   // 不翻：按鈕用要切過去的那種語言寫
+  b.title = en ? "改用中文介面" : "Switch to English";   // 不翻：同上
+  b.setAttribute("aria-label", b.title);
+}
+$("langBtn").onclick = () => {
+  if (recording || importing || aiBusy() || nfBusy || agendaBusy) {
+    showAlert(_("錄音、匯入或 AI 整理進行中，結束後再切換語言。"), "warn");
+    return;
+  }
+  store.set("ms.lang", UI_LANG === "en" ? "zh" : "en");
+  location.reload();
+};
+renderLangBtn();
 // 匯入錄好的檔案（#90）：{name, size, sent, stage, done, total, elapsed, lastEvt, xhr, cancelled}；開頭就宣告，載入時 updateDock 會讀
 let importing = null, meetingImported = false;
 // 表單紀錄（#3、#97，例如 IEP 會議紀錄）：form＝{template, title, date, values:{header, items}, edited, switched}
@@ -842,21 +874,21 @@ function setRecording(on) {
   if (on) { $("saveStatus").textContent = ""; $("saveStatus").className = ""; $("savePanel").hidden = true; }
   $("lamp").classList.toggle("on", on);
   $("lamp").classList.toggle("imp", on && !!importing);   // 匯入沒有麥克風，不顯示音量條
-  $("segEmpty").textContent = on && importing ? "轉好的逐字稿會依時間排在這裡。" : "開始說話後，定稿的句子會依時間排在這裡。";
+  $("segEmpty").textContent = on && importing ? _("轉好的逐字稿會依時間排在這裡。") : _("開始說話後，定稿的句子會依時間排在這裡。");
   if (on) {
     startedAt = Date.now();
     const tick = () => {
       if (importing) {
         const st = importProgress();
-        $("lampText").textContent = st.pct != null ? `匯入 ${Math.floor(st.pct * 100)}%` : "匯入中";
+        $("lampText").textContent = st.pct != null ? _("匯入 {v}%", { v: Math.floor(st.pct * 100) }) : _("匯入中");
         if ($("status").className !== "err") setStatus(st.text);
         checkImportAlive();
         return;
       }
       const sec = Math.round((Date.now() - startedAt) / 1000);
-      $("lampText").textContent = cut ? "收音中斷" : `REC ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+      $("lampText").textContent = cut ? _("收音中斷") : `REC ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
       if ($("status").className !== "err") {
-        setStatus(CLOUD.has(engineNow) ? `錄音中，約 US$${(sec / 3600 * ASR[engineNow].price()).toFixed(3)}` : `錄音中，本機辨識（免費）每 5～10 秒出一段${localMs ? `，上一段辨識 ${(localMs / 1000).toFixed(1)} 秒` : ""}`);
+        setStatus(CLOUD.has(engineNow) ? _("錄音中，約 US${v}", { v: (sec / 3600 * ASR[engineNow].price()).toFixed(3) }) : _("錄音中，本機辨識（免費）每 5～10 秒出一段{v}", { v: localMs ? _("，上一段辨識 {v} 秒", { v: (localMs / 1000).toFixed(1) }) : "" }));
       }
     };
     tick();
@@ -866,7 +898,7 @@ function setRecording(on) {
     if (importing) { durationMs = importing.total; totalMs = tOffset + durationMs; }
     else if (startedAt) { durationMs = Date.now() - startedAt; totalMs = tOffset + durationMs; }
     setCut(false);
-    $("lampText").textContent = "待命";
+    $("lampText").textContent = _("待命");
   }
 }
 
@@ -875,7 +907,7 @@ let cut = false;
 function setCut(on) {
   cut = on;
   $("lamp").classList.toggle("cut", on);
-  if (on) $("lampText").textContent = "收音中斷";
+  if (on) $("lampText").textContent = _("收音中斷");
 }
 
 // ---- 音訊擷取：AudioWorklet → 降頻到 16 kHz → PCM s16le（iPhone Safari 也適用） ----
@@ -920,14 +952,14 @@ async function getTabAudio(kind) {
   if (!s.getAudioTracks().length) {
     s.getTracks().forEach((t) => t.stop());
     throw new Error(surface === "monitor" || kind === "sys"
-      ? "沒有分享到聲音。請重按開始，選「整個螢幕」並打開「同時分享系統音訊」"
+      ? _("沒有分享到聲音。請重按開始，選「整個螢幕」並打開「同時分享系統音訊」")
       : surface === "window"
-        ? "視窗沒有聲音可以分享。請重按開始，改選「Chrome 分頁」（打開分享分頁音訊）或「整個螢幕」（打開分享系統音訊）"
-        : "沒有分享到聲音。請重按開始，選「Chrome 分頁」並打開「同時分享分頁音訊」");
+        ? _("視窗沒有聲音可以分享。請重按開始，改選「Chrome 分頁」（打開分享分頁音訊）或「整個螢幕」（打開分享系統音訊）")
+        : _("沒有分享到聲音。請重按開始，選「Chrome 分頁」並打開「同時分享分頁音訊」"));
   }
   s.getAudioTracks()[0].onended = () => {
     if (!recording) return;
-    setStatus("已停止分享聲音，錄音結束", true);
+    setStatus(_("已停止分享聲音，錄音結束"), true);
     stop();
   };
   return s;
@@ -938,7 +970,7 @@ async function startAudio(sendPcm) {
   if (source === "mic" || source === "mix") {
     const audio = { echoCancellation: false, noiseSuppression: true, channelCount: 1 };
     const mic = $("micSel").value;
-    setStatus("請允許使用麥克風…");   // 瀏覽器跳出權限詢問時，畫面不要只寫「連線中」
+    setStatus(_("請允許使用麥克風…"));   // 瀏覽器跳出權限詢問時，畫面不要只寫「連線中」
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: mic ? { ...audio, deviceId: { exact: mic } } : audio });
     } catch (e) {
@@ -949,12 +981,12 @@ async function startAudio(sendPcm) {
     micLabel = track?.label || "";
     if (track) {
       // iPhone 來電、鎖螢幕或別的 App 搶麥克風時，系統會暫停這條收音
-      track.onmute = () => { if (recording) { setCut(true); showAlert("收音被系統暫停了（可能是來電、鎖螢幕或其他 App 用到麥克風）。回到這個畫面後如果沒恢復，請停止再重新開始。", "mute"); } };
+      track.onmute = () => { if (recording) { setCut(true); showAlert(_("收音被系統暫停了（可能是來電、鎖螢幕或其他 App 用到麥克風）。回到這個畫面後如果沒恢復，請停止再重新開始。"), "mute"); } };
       track.onunmute = () => { setCut(false); hideAlert("mute"); };
     }
     loadMics();   // 拿到權限後才有裝置名稱
   } else {
-    micLabel = source === "sys" ? "系統聲音" : "分頁聲音";
+    micLabel = source === "sys" ? _("系統聲音") : _("分頁聲音");
   }
   await audioCtx.resume();
   const url = URL.createObjectURL(new Blob([WORKLET_SRC], { type: "application/javascript" }));
@@ -996,7 +1028,7 @@ async function startAudio(sendPcm) {
   mixer.connect(workletNode).connect(mute).connect(audioCtx.destination);
   // 分頁／螢幕在按下開始時就分享了，但 recording 要到這裡之後才設；這段期間停止分享，onended 不會處理
   if (displayStream && displayStream.getAudioTracks()[0].readyState === "ended") {
-    throw new Error("聲音分享已停止，錄音沒有開始");
+    throw new Error(_("聲音分享已停止，錄音沒有開始"));
   }
 }
 
@@ -1022,7 +1054,7 @@ function watchSilence(data) {
   if (!silentSince) silentSince = now;
   else if (!silentWarned && now - silentSince > 8000) {
     silentWarned = true;
-    showAlert("已經 8 秒完全收不到聲音。如果有人在講話卻沒有出字，請確認麥克風沒有被靜音或被其他 App 使用，外接麥克風請檢查連線；聲音回來時這則提醒會自動消失。", "silent");
+    showAlert(_("已經 8 秒完全收不到聲音。如果有人在講話卻沒有出字，請確認麥克風沒有被靜音或被其他 App 使用，外接麥克風請檢查連線；聲音回來時這則提醒會自動消失。"), "silent");
   }
 }
 
@@ -1069,7 +1101,7 @@ async function keepAwake(on) {
     if (!on) { await wakeLock?.release(); wakeLock = null; }
   } catch (e) {
     // 桌機螢幕不會自己鎖到停止收音，只有手機與平板需要提醒
-    if (on && touchOnly) showAlert("這台裝置沒辦法讓螢幕保持亮著。請到「設定」把自動鎖定調長，錄音時不要讓螢幕關掉。", "wake");
+    if (on && touchOnly) showAlert(_("這台裝置沒辦法讓螢幕保持亮著。請到「設定」把自動鎖定調長，錄音時不要讓螢幕關掉。"), "wake");
   }
 }
 
@@ -1102,7 +1134,7 @@ function render() {
 function renderCaption(paras) {
   const cap = $("caption");
   const last = paras[paras.length - 1];
-  if (!last) { cap.innerHTML = `<span class="idle">${recording ? "聆聽中…" : "即時字幕"}</span>`; return; }
+  if (!last) { cap.innerHTML = `<span class="idle">${recording ? _("聆聽中…") : _("即時字幕")}</span>`; return; }
   let budget = 44;
   const pieces = [];
   for (let i = last.parts.length - 1; i >= 0 && budget > 0; i--) {
@@ -1142,7 +1174,7 @@ function updateSegs() {
     if (t.text === "<end>") {
       // 停頓就是句子結束：補上的逗號改成句號（只改畫面上的句子，定稿字詞不動）
       const last = segs[segs.length - 1];
-      if (last && !segBreak && /，$/.test(last.text)) { last.text = last.text.slice(0, -1) + "。"; last.rendered = -1; }
+      if (last && !segBreak && /，$/.test(last.text)) { last.text = last.text.slice(0, -1) + "。"; last.rendered = -1; }   // 不翻：標點處理
       segBreak = true;
       continue;
     }
@@ -1174,7 +1206,7 @@ function renderSegs(full = false) {
       if (s.speaker && s.speaker !== segs[i - 1]?.speaker) {
         const sp = document.createElement("span");
         sp.className = "spk";
-        sp.textContent = "講者 " + s.speaker;
+        sp.textContent = _("講者 ") + s.speaker;
         s.el.append(sp);
       }
       s.txt = document.createElement("span");
@@ -1197,7 +1229,7 @@ function transcriptText() {
   const lines = [];
   let lastSpk = null;
   for (const s of segs) {
-    if (s.speaker && s.speaker !== lastSpk) { lines.push(`${lines.length ? "\n" : ""}[講者 ${s.speaker}]`); lastSpk = s.speaker; }
+    if (s.speaker && s.speaker !== lastSpk) { lines.push(`${lines.length ? "\n" : ""}[講者 ${s.speaker}]`); lastSpk = s.speaker; }   // 不翻：逐字稿檔案內容
     // 逐句轉換：tidy 會吃掉句尾標點後的空白，整份一起轉會把換行也吃掉
     lines.push(`[${fmtTime(s.start)}] ${show(s.text).trim()}`);
   }
@@ -1230,11 +1262,11 @@ function newMeetingId() {
 
 function setAiNote(msg, err = false) { $("aiNote").textContent = msg; $("aiNote").className = "hint" + (err ? " err" : ""); }
 const AI_NOTE = $("aiNote").textContent;
-const RESUME_NOTE = "AI 還在整理這場，結果會陸續補上。可以關掉這頁，整理完會自己存進暫存。";
+const RESUME_NOTE = _("AI 還在整理這場，結果會陸續補上。可以關掉這頁，整理完會自己存進暫存。");
 // 伺服器的整理狀態（#108）：同時整理的會議滿了先排隊；Claude 不能用時改用 Codex
 function showAiStatus(ev) {
-  if (ev.state === "waiting") setAiNote("排隊中：同時整理的會議已滿，前面的會議結束後就開始整理。字幕照常。");
-  else if (ev.engine === "codex") setAiNote("Claude 暫時不能用，這場改用 Codex 整理。");
+  if (ev.state === "waiting") setAiNote(_("排隊中：同時整理的會議已滿，前面的會議結束後就開始整理。字幕照常。"));
+  else if (ev.engine === "codex") setAiNote(_("Claude 暫時不能用，這場改用 Codex 整理。"));
   else setAiNote(aiResumed ? RESUME_NOTE : AI_NOTE);
 }
 
@@ -1248,24 +1280,24 @@ function addUsage(a, b) {
   for (const k of Object.keys(out)) out[k] += Number(b[k]) || 0;
   return out;
 }
-const money = (usd) => `US$${usd < 0.1 ? usd.toFixed(3) : usd.toFixed(2)}（NT$${(usd * USD_TWD).toFixed(usd * USD_TWD < 10 ? 1 : 0)}）`;
-const tokCount = (n) => n >= 10000 ? `${(n / 10000).toFixed(1)} 萬` : String(n);
+const money = (usd) => _("US${v}（NT${v2}）", { v: usd < 0.1 ? usd.toFixed(3) : usd.toFixed(2), v2: (usd * USD_TWD).toFixed(usd * USD_TWD < 10 ? 1 : 0) });
+const tokCount = (n) => n < 10000 ? String(n) : UI_LANG === "en" ? `${(n / 1000).toFixed(n < 100000 ? 1 : 0)}k` : `${(n / 10000).toFixed(1)} 萬`;   // 不翻：中文用萬、英文用 k
 function renderUsage() {
   const el = $("usageNote");
   const ms = totalMs || durationMs, secs = Math.round(ms / 1000), min = Math.floor(secs / 60), sec = secs % 60;
   if (phase !== "done" || (!ms && engineNow !== "transcript")) { el.hidden = true; return; }
-  const parts = ms ? [`錄音 ${min} 分 ${sec} 秒`] : [];
-  if (engineNow === "transcript") parts.push("匯入逐字稿，沒有轉錄費");
-  else if (engineNow === "soniox") parts.push(`Soniox 約 ${money(ms / 3600000 * (meetingImported ? SONIOX_ASYNC_USD_PER_HOUR : SONIOX_USD_PER_HOUR))}`);
-  else if (engineNow === "azure") parts.push(`Azure 約 ${money(ms / 3600000 * ASR.azure.price())}`);
-  else if (engineNow) parts.push("本機辨識不另計費");
+  const parts = ms ? [_("錄音 {min} 分 {sec} 秒", { min, sec })] : [];
+  if (engineNow === "transcript") parts.push(_("匯入逐字稿，沒有轉錄費"));
+  else if (engineNow === "soniox") parts.push(_("Soniox 約 {v}", { v: money(ms / 3600000 * (meetingImported ? SONIOX_ASYNC_USD_PER_HOUR : SONIOX_USD_PER_HOUR)) }));
+  else if (engineNow === "azure") parts.push(_("Azure 約 {v}", { v: money(ms / 3600000 * ASR.azure.price()) }));
+  else if (engineNow) parts.push(_("本機辨識不另計費"));
   const u = addUsage(aiUsage, extraUsage);
   if (u && u.calls) {
     const total = u.input + u.output + u.cache_write + u.cache_read;
-    parts.push(`Claude ${u.calls} 次、${tokCount(total)} tokens，API 等值約 ${money(u.cost_usd)}，用訂閱額度不另付費`);
-    el.title = `輸入 ${u.input}、輸出 ${u.output}、寫入快取 ${u.cache_write}、讀取快取 ${u.cache_read} tokens；匯率以 1 美元 ${USD_TWD} 元估算`;
+    parts.push(_("Claude {calls} 次、{v} tokens，API 等值約 {v2}，用訂閱額度不另付費", { calls: u.calls, v: tokCount(total), v2: money(u.cost_usd) }));
+    el.title = _("輸入 {input}、輸出 {output}、寫入快取 {cache_write}、讀取快取 {cache_read} tokens；匯率以 1 美元 {USD_TWD} 元估算", { input: u.input, output: u.output, cache_write: u.cache_write, cache_read: u.cache_read, USD_TWD });
   }
-  el.textContent = "本場用量：" + parts.join("・");
+  el.textContent = _("本場用量：") + parts.join("・");
   el.hidden = false;
 }
 
@@ -1285,7 +1317,7 @@ function resetAi() {
   resetSummary();
   resetMinutes();
   aiUsage = extraUsage = null;
-  setAiNote(aiOn ? "每約 150 字或 1 分鐘整理一段：校正錯字並寫一句重點。" : "這場沒有開「AI 整理」。");
+  setAiNote(aiOn ? _("每約 150 字或 1 分鐘整理一段：校正錯字並寫一句重點。") : _("這場沒有開「AI 整理」。"));
   if (aiOn) openEvents();
 }
 
@@ -1322,12 +1354,12 @@ function openEvents() {
       if (aiResumed) {
         aiResumed = false; aiOn = false;
         forgetAiDraft();
-        setAiNote(missingChunks().length ? "AI 整理結束了，但有段落沒有結果，可以按「補跑缺少的段落」。" : "AI 整理完成。", missingChunks().length > 0);
+        setAiNote(missingChunks().length ? _("AI 整理結束了，但有段落沒有結果，可以按「補跑缺少的段落」。") : _("AI 整理完成。"), missingChunks().length > 0);
       }
       // 結束了卻沒收到總結（例如伺服器重開）：當成失敗，讓使用者可以重新產生
-      if (sumPending) { sumPending = false; if (!summary && !sumError) sumError = "伺服器沒有送回總結"; renderSummary(); }
+      if (sumPending) { sumPending = false; if (!summary && !sumError) sumError = _("伺服器沒有送回總結"); renderSummary(); }
       // 不是我們按結束的（例如超過 6 小時或伺服器重開）：這場的 AI 整理就停，字幕照常
-      if (!aiEnded) { aiOn = false; setAiNote("AI 整理已停止（這場開太久或伺服器重開），字幕照常。", true); }
+      if (!aiEnded) { aiOn = false; setAiNote(_("AI 整理已停止（這場開太久或伺服器重開），字幕照常。"), true); }
       if (aiEnded) forgetAiDraft();
       if (redoMap) { redoMap = false; if (summary) genMindmap(); }   // 依說明重整：總結好了再重產心智圖（舊的放進復原）
       renderBackfill();
@@ -1349,7 +1381,7 @@ function maybeSendChunk(force = false, end = segs.length) {
   sentSeg = upto;
   let lastSpk = null;
   const text = list.map((x) => {
-    const head = x.speaker && x.speaker !== lastSpk ? `講者 ${x.speaker}：` : "";
+    const head = x.speaker && x.speaker !== lastSpk ? `講者 ${x.speaker}：` : "";   // 不翻：送給 AI 的段落格式
     lastSpk = x.speaker ?? lastSpk;
     return head + show(x.text).trim();
   }).join("\n");
@@ -1401,11 +1433,11 @@ async function postChunk(idx, start, end, text, seg = null) {
     // 主機 沒有 Claude、會議太多或這場已被收掉：這場先停，字幕照常
     if (r.status === 503 || r.status === 409) {
       aiOn = false;
-      setAiNote("AI 整理暫停：" + (j.error || r.status), true);
+      setAiNote(_("AI 整理暫停：") + (j.error || r.status), true);
       if (evtSrc) { evtSrc.close(); evtSrc = null; }
     }
   } catch (e) {
-    showChunkResult({ idx, error: "連不到伺服器" });
+    showChunkResult({ idx, error: _("連不到伺服器") });
   }
 }
 
@@ -1439,7 +1471,7 @@ function missingChunks() {
 function renderBackfill() {
   const n = missingChunks().length, b = $("aiBackfill");
   b.hidden = !(n && draftId && phase === "done" && !recording && !importing && !evtSrc);
-  b.textContent = `補跑缺少的段落（${n} 段）`;
+  b.textContent = _("補跑缺少的段落（{n} 段）", { n });
 }
 // redo（#191）：依會議說明重整整場：全部段落都重送，總結出來後重產心智圖
 let redoMap = false;
@@ -1452,13 +1484,13 @@ async function backfillAi({ redo = false } = {}) {
   extraUsage = addUsage(extraUsage, aiUsage); aiUsage = null;
   meetingId = newMeetingId(); aiRecovered = false; aiParaEpoch = ""; continuing = false;
   aiOn = true; aiEnded = true; aiResumed = true;
-  for (const [, c] of miss) { c.error = ""; c.el.classList.remove("err"); c.state.textContent = "整理中…"; c.sum.textContent = ""; }
+  for (const [, c] of miss) { c.error = ""; c.el.classList.remove("err"); c.state.textContent = _("整理中…"); c.sum.textContent = ""; }
   sumPending = true; renderSummary();
   const mid = meetingId, did = draftId;
   rememberAiDraft(did);
   openEvents();
-  setAiNote(redo ? `依說明重整 ${miss.length} 段中，整理完會重新產生總結${redoMap ? "與心智圖" : ""}。可以關掉這頁，結果會自己存進暫存。`
-    : `補跑 ${miss.length} 段中，補完會用整場重新產生總結。可以關掉這頁，結果會自己存進暫存。`);
+  setAiNote(redo ? _("依說明重整 {n} 段中，整理完會重新產生總結{v}。可以關掉這頁，結果會自己存進暫存。", { n: miss.length, v: redoMap ? _("與心智圖") : "" })
+    : _("補跑 {n} 段中，補完會用整場重新產生總結。可以關掉這頁，結果會自己存進暫存。", { n: miss.length }));
   let sent = 0, fail = "";
   for (const [idx, c] of miss) {
     if (!fail) {
@@ -1466,7 +1498,7 @@ async function backfillAi({ redo = false } = {}) {
         polish: $("polish").checked, backfill: true, context: meetingContext, ...(redo ? { redo: true } : {}) });
       if (mid !== meetingId) return;   // 等待期間換了一場
       if (r && r.ok) { sent++; continue; }
-      fail = r ? ((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`) : "連不到伺服器";
+      fail = r ? ((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`) : _("連不到伺服器");
     }
     showChunkResult({ idx, error: fail });
   }
@@ -1475,7 +1507,7 @@ async function backfillAi({ redo = false } = {}) {
     if (evtSrc) { evtSrc.close(); evtSrc = null; }
     aiOn = false; aiResumed = false; sumPending = false; redoMap = false; renderSummary();
     forgetAiDraft();
-    setAiNote((redo ? "依說明重整失敗：" : "補跑失敗：") + fail, true);
+    setAiNote((redo ? _("依說明重整失敗：") : _("補跑失敗：")) + fail, true);
     saveAiSoon();
     renderBackfill();
     return;
@@ -1484,7 +1516,7 @@ async function backfillAi({ redo = false } = {}) {
     await fetch(api("/api/agent/end"), { method: "POST", headers: { "Content-Type": "application/json", "X-Meeting-Scribe": "1" }, body: JSON.stringify({ meeting: mid }) });
   } catch (e) { /* 伺服器閒置一陣子也會自己收尾 */ }
 }
-$("aiBackfill").onclick = () => backfillAi().catch((e) => setAiNote("補跑失敗：" + e.message, true));
+$("aiBackfill").onclick = () => backfillAi().catch((e) => setAiNote(_("補跑失敗：") + e.message, true));
 
 function followPanel(panel, fn) {
   const follow = panel.scrollHeight - panel.scrollTop - panel.clientHeight < 40;
@@ -1500,7 +1532,7 @@ function addCard(idx, start, end) {
   const span = document.createElement("span");
   span.textContent = `${fmtTime(start)}–${fmtTime(end)}`;
   const state = document.createElement("span");
-  state.textContent = "整理中…";
+  state.textContent = _("整理中…");
   meta.append(span, state);
   const sum = document.createElement("div");
   sum.className = "sum";
@@ -1519,7 +1551,7 @@ function showChunkResult(ev) {
     c.error = ev.error;
     c.head = ev.idx;
     c.el.classList.add("err");
-    c.state.textContent = "失敗";
+    c.state.textContent = _("失敗");
     c.sum.textContent = ev.error;
     return;
   }
@@ -1547,13 +1579,13 @@ function renderTopic(headIdx) {
   const list = [...chunks.entries()].filter(([, x]) => x.head === headIdx).sort((a, b) => a[0] - b[0]);
   const first = list[0][0], [lastIdx, last] = list[list.length - 1];
   head.el.querySelector(".meta span").textContent = `${fmtTime(head.start)}–${fmtTime(last.end)}`;
-  head.state.textContent = first === lastIdx ? `第 ${first} 段` : `第 ${first}–${lastIdx} 段`;
-  head.sum.textContent = list.map(([, x]) => x.summary).filter(Boolean).join("\n") || "（沒有摘要）";
+  head.state.textContent = first === lastIdx ? _("第 {first} 段", { first }) : _("第 {first}–{lastIdx} 段", { first, lastIdx });
+  head.sum.textContent = list.map(([, x]) => x.summary).filter(Boolean).join("\n") || _("（沒有摘要）");
   const polished = list.some(([, x]) => x.readable);
   const old = head.el.querySelector("details");
   const det = document.createElement("details");
   const s = document.createElement("summary");
-  s.textContent = polished ? "優化文" : "校正文";
+  s.textContent = polished ? _("優化文") : _("校正文");
   det.open = old ? old.open : polished;
   const body = document.createElement("p");
   body.textContent = list.map(([, x]) => x.readable || x.corrected || "").filter(Boolean).join("\n");
@@ -1567,7 +1599,7 @@ function addChip(c, text) {
   const chip = document.createElement("div");
   chip.className = "chip";
   const b = document.createElement("b");
-  b.textContent = "AI 重點・" + c.el.querySelector(".meta span").textContent;
+  b.textContent = _("AI 重點・") + c.el.querySelector(".meta span").textContent;
   chip.append(b, document.createTextNode(text));
   c.chip?.remove();
   c.chip = chip;
@@ -1587,7 +1619,7 @@ function showLive(ev) {
   $("liveEmpty").hidden = true;
   const c = ev.upto ? chunks.get(ev.upto) : null;
   const at = c ? c.el.querySelector(".meta span").textContent.split("–")[1] : "";
-  $("liveMeta").textContent = `更新到第 ${ev.upto ?? "?"} 段${at ? `（${at}）` : ""}`;
+  $("liveMeta").textContent = _("更新到第 {v} 段{v2}", { v: ev.upto ?? "?", v2: at ? _("（{at}）", { at }) : "" });
   renderMd($("live"), ev.text);
 }
 
@@ -1660,7 +1692,7 @@ async function vaultOpenWith(raw) {
 }
 async function passRaw(pass) {
   const kek = await passKek(pass, vault.rec.salt, vault.rec.iter);
-  try { return await unseal(kek, vault.rec.wrapPass, VAULT_AAD); } catch (e) { throw new Error("密語不對"); }
+  try { return await unseal(kek, vault.rec.wrapPass, VAULT_AAD); } catch (e) { throw new Error(_("密語不對")); }
 }
 async function vaultCreate(pass) {
   const raw = rand(32), salt = rand(16);
@@ -1696,10 +1728,10 @@ function vaultCred(id) {
 function needCred(id) {
   const name = ASR[id].label;
   const fail = (msg) => { const e = new Error(msg); e.vault = true; return e; };
-  if (!vault.rec) throw fail(`先在「轉錄設定」建立金鑰保管箱，設定 ${name} 的金鑰`);
-  if (!vaultIsOpen()) throw fail("金鑰保管箱上鎖了，請先在「轉錄設定」解鎖");
+  if (!vault.rec) throw fail(_("先在「轉錄設定」建立金鑰保管箱，設定 {name} 的金鑰", { name }));
+  if (!vaultIsOpen()) throw fail(_("金鑰保管箱上鎖了，請先在「轉錄設定」解鎖"));
   const c = vaultCred(id);
-  if (!c) throw fail(`還沒設定 ${name} 的金鑰（在「轉錄設定」）`);
+  if (!c) throw fail(_("還沒設定 {name} 的金鑰（在「轉錄設定」）", { name }));
   return c;
 }
 
@@ -1710,7 +1742,7 @@ async function prfEval(credId, salt) {
     challenge: rand(32), rpId: location.hostname, allowCredentials: [{ type: "public-key", id: credId }],
     userVerification: "required", timeout: 60000, extensions: { prf: { eval: { first: salt } } } } });
   const out = cred?.getClientExtensionResults?.().prf?.results?.first;
-  if (!out) throw new Error("這把 passkey 不支援產生加密金鑰（PRF），請改用密語");
+  if (!out) throw new Error(_("這把 passkey 不支援產生加密金鑰（PRF），請改用密語"));
   return new Uint8Array(out);
 }
 async function vaultAddPasskey(pass) {
@@ -1719,12 +1751,12 @@ async function vaultAddPasskey(pass) {
     const salt = rand(32);
     const cred = await navigator.credentials.create({ publicKey: {
       rp: { name: "Cyclone Scribe", id: location.hostname },
-      user: { id: rand(16), name: "meeting-scribe", displayName: "Cyclone Scribe 轉錄金鑰" },
+      user: { id: rand(16), name: "meeting-scribe", displayName: _("Cyclone Scribe 轉錄金鑰") },
       challenge: rand(32), pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }],
       authenticatorSelection: { residentKey: "preferred", userVerification: "required" }, timeout: 60000,
       extensions: { prf: { eval: { first: salt } } } } });
     const ext = cred.getClientExtensionResults?.().prf || {};
-    if (ext.enabled === false) throw new Error("這台裝置的 passkey 不支援產生加密金鑰（PRF），請繼續用密語");
+    if (ext.enabled === false) throw new Error(_("這台裝置的 passkey 不支援產生加密金鑰（PRF），請繼續用密語"));
     const credId = new Uint8Array(cred.rawId);
     const prf = ext.results?.first ? new Uint8Array(ext.results.first) : await prfEval(credId, salt);
     vault.rec.passkey = { credId, salt, wrap: await seal(await prfKek(prf), raw, VAULT_AAD) };
@@ -1737,7 +1769,7 @@ async function vaultAddPasskey(pass) {
 async function vaultUnlockPasskey() {
   const pk = vault.rec.passkey, prf = await prfEval(pk.credId, pk.salt);
   let raw;
-  try { raw = await unseal(await prfKek(prf), pk.wrap, VAULT_AAD); } catch (e) { throw new Error("passkey 解不開，請改用密語"); } finally { prf.fill(0); }
+  try { raw = await unseal(await prfKek(prf), pk.wrap, VAULT_AAD); } catch (e) { throw new Error(_("passkey 解不開，請改用密語")); } finally { prf.fill(0); }
   await vaultOpenWith(raw);
 }
 
@@ -1746,7 +1778,7 @@ for (const ev of ["pointerdown", "keydown"]) addEventListener(ev, () => { if (va
 setInterval(() => {
   if (!vault.dek) return;
   if (recording) vault.lastUse = Date.now();
-  else if (Date.now() - vault.lastUse > VAULT_IDLE_MS) { vaultLock(); setVaultNote("閒置太久，金鑰保管箱已自動上鎖"); }
+  else if (Date.now() - vault.lastUse > VAULT_IDLE_MS) { vaultLock(); setVaultNote(_("閒置太久，金鑰保管箱已自動上鎖")); }
 }, 30000);
 
 async function sonioxMint(key, seconds) {
@@ -1754,18 +1786,18 @@ async function sonioxMint(key, seconds) {
   try {
     r = await fetch(ASR_URLS.sonioxTemp, { method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({ usage_type: "transcribe_websocket", expires_in_seconds: seconds, single_use: true, max_session_duration_seconds: 4 * 3600 }) });
-  } catch (e) { throw new Error("連不到 Soniox"); }
+  } catch (e) { throw new Error(_("連不到 Soniox")); }
   const j = await r.json().catch(() => ({}));
-  if (!r.ok || !j.api_key) throw new Error(r.status === 401 ? "Soniox 金鑰無效" : `Soniox 換臨時金鑰失敗（HTTP ${r.status}）`);
+  if (!r.ok || !j.api_key) throw new Error(r.status === 401 ? _("Soniox 金鑰無效") : _("Soniox 換臨時金鑰失敗（HTTP {status}）", { status: r.status }));
   return j.api_key;
 }
 async function azureToken(c) {
-  if (!/^[a-z0-9]{2,40}$/.test(c.region || "")) throw new Error("Azure 區域格式不對（例：eastasia）");
+  if (!/^[a-z0-9]{2,40}$/.test(c.region || "")) throw new Error(_("Azure 區域格式不對（例：eastasia）"));
   let r;
   try { r = await fetch(ASR_URLS.azureToken(c.region), { method: "POST", headers: { "Ocp-Apim-Subscription-Key": c.key } }); }
-  catch (e) { throw new Error("連不到 Azure（區域對嗎？）"); }
+  catch (e) { throw new Error(_("連不到 Azure（區域對嗎？）")); }
   const t = await r.text().catch(() => "");
-  if (!r.ok || !t) throw new Error(r.status === 401 ? "Azure 金鑰無效或區域不對" : `Azure 換 token 失敗（HTTP ${r.status}）`);
+  if (!r.ok || !t) throw new Error(r.status === 401 ? _("Azure 金鑰無效或區域不對") : _("Azure 換 token 失敗（HTTP {status}）", { status: r.status }));
   return t;
 }
 let azureSdk = null;
@@ -1775,8 +1807,8 @@ function loadAzureSdk() {
   if (!azureSdk) azureSdk = new Promise((resolve, reject) => {
     const s = document.createElement("script");
     s.src = AZURE_SDK; s.async = true;
-    s.onload = () => (window.SpeechSDK ? resolve(window.SpeechSDK) : reject(new Error("Azure SDK 載入失敗")));
-    s.onerror = () => { azureSdk = null; s.remove(); reject(new Error("Azure SDK 下載失敗")); };
+    s.onload = () => (window.SpeechSDK ? resolve(window.SpeechSDK) : reject(new Error(_("Azure SDK 載入失敗"))));
+    s.onerror = () => { azureSdk = null; s.remove(); reject(new Error(_("Azure SDK 下載失敗"))); };
     document.head.append(s);
   });
   return azureSdk;
@@ -1795,7 +1827,7 @@ const ASR = {
         const r = await fetch(api("/token"), { method: "POST", headers: { "X-Meeting-Scribe": "1" } })
           .catch((e) => { throw new Error(hostDownText(e)); });
         const j = await r.json().catch(() => ({}));
-        if (!r.ok || !j.api_key) throw new Error("拿不到臨時金鑰：" + (j.error || r.status));
+        if (!r.ok || !j.api_key) throw new Error(_("拿不到臨時金鑰：") + (j.error || r.status));
         return { temp: j.api_key };
       }
       return { temp: await sonioxMint(needCred("soniox").key, 60) };
@@ -1820,8 +1852,8 @@ const ASR = {
       sock.onmessage = (ev) => {
         const m = JSON.parse(ev.data);
         if (m.error_code) {
-          const hint = m.error_code === 402 ? "（帳戶餘額不足，請到 Soniox Console 儲值）" : "";
-          h.error(`Soniox 錯誤 ${m.error_code}：${m.error_message}${hint}`);
+          const hint = m.error_code === 402 ? _("（帳戶餘額不足，請到 Soniox Console 儲值）") : "";
+          h.error(_("Soniox 錯誤 {error_code}：{error_message}{hint}", { error_code: m.error_code, error_message: m.error_message, hint }));
           return;
         }
         const fin = [], nf = [];
@@ -1830,7 +1862,7 @@ const ASR = {
         if (m.finished) { finished = true; h.finished(); sock.close(); }
       };
       sock.onclose = () => h.closed(finished);
-      sock.onerror = () => h.warn("連線錯誤");
+      sock.onerror = () => h.warn(_("連線錯誤"));
       return {
         send(buf) { if (sock.readyState === 1) sock.send(buf); },
         // 送空訊框請伺服器把剩下的暫定字定稿後收尾
@@ -1841,7 +1873,7 @@ const ASR = {
   },
   azure: {
     label: "Azure",
-    fields: [{ id: "key", label: "金鑰（KEY 1 或 KEY 2）" }, { id: "region", label: "區域", plain: true }],
+    fields: [{ id: "key", label: _("金鑰（KEY 1 或 KEY 2）") }, { id: "region", label: _("區域"), plain: true }],
     price: () => ($("azDiar").checked ? AZURE_DIAR_USD_PER_HOUR : AZURE_USD_PER_HOUR),
     test: (c) => azureToken(c),
     async credential() {
@@ -1866,20 +1898,20 @@ const ASR = {
         return speakers.get(sid);
       };
       let started = false, stopping = false, ended = false, stopTimer = 0;
-      rec[diar ? "transcribing" : "recognizing"] = (_, e) => {
+      rec[diar ? "transcribing" : "recognizing"] = (_s, e) => {
         if (e.result.text) h.tokens([], [{ text: e.result.text, speaker: who(e.result.speakerId), start: ms(e.result.offset) }]);
       };
-      rec[diar ? "transcribed" : "recognized"] = (_, e) => {
+      rec[diar ? "transcribed" : "recognized"] = (_s, e) => {
         if (e.result.reason !== S.ResultReason.RecognizedSpeech || !e.result.text) return;
         // Azure 一次回一整句：句尾當作停頓，跟 Soniox 開停頓分段時一樣換行
         const fin = [{ text: e.result.text, speaker: who(e.result.speakerId), start: ms(e.result.offset) }];
         if ($("ep").checked) fin.push({ text: "<end>" });
         h.tokens(fin, []);
       };
-      rec.canceled = (_, e) => { if (!stopping && e.reason === S.CancellationReason.Error) h.error(`Azure 錯誤：${e.errorDetails || e.errorCode}`); };
+      rec.canceled = (_s, e) => { if (!stopping && e.reason === S.CancellationReason.Error) h.error(_("Azure 錯誤：{v}", { v: e.errorDetails || e.errorCode })); };
       // token 10 分鐘過期：每 8 分鐘用這台裝置的金鑰換新的
       const refresh = setInterval(async () => {
-        try { rec.authorizationToken = await azureToken(needCred("azure")); } catch (e) { h.warn("Azure 續用 token 失敗：" + e.message); }
+        try { rec.authorizationToken = await azureToken(needCred("azure")); } catch (e) { h.warn(_("Azure 續用 token 失敗：") + e.message); }
       }, 8 * 60 * 1000);
       const release = () => { clearInterval(refresh); clearTimeout(stopTimer); try { rec.close(); } catch (e) { /* 已關 */ } };
       const end = () => {
@@ -1892,7 +1924,7 @@ const ASR = {
       // 音訊送完後 Azure 會把剩下的辨識完再發 sessionStopped；最多等 15 秒
       rec.sessionStopped = () => { if (stopping) end(); };
       (diar ? rec.startTranscribingAsync.bind(rec) : rec.startContinuousRecognitionAsync.bind(rec))(
-        () => { started = true; h.open(); }, (err) => h.error("Azure 無法開始辨識：" + err));
+        () => { started = true; h.open(); }, (err) => h.error(_("Azure 無法開始辨識：") + err));
       return {
         send(buf) { if (!stopping) push.write(buf); },
         finish() {
@@ -1920,7 +1952,7 @@ function asrOpen(id, cred, first, base = 0) {
           await startAudio((buf) => asrFeed(buf));
         } catch (e) {
           stopAudio();       // getUserMedia 成功但後續失敗時，也要關掉麥克風
-          setStatus("收音無法啟動：" + e.message, true);
+          setStatus(_("收音無法啟動：") + e.message, true);
           asrGen++; asr?.close(); asr = null;
           cleanup();
           return;
@@ -1948,7 +1980,7 @@ function asrOpen(id, cred, first, base = 0) {
       maybeSendChunk();
       syncDraft();
     },
-    finished() { if (live()) { finishAi(); setStatus("已結束，可以下載逐字稿"); } },
+    finished() { if (live()) { finishAi(); setStatus(_("已結束，可以下載逐字稿")); } },
     warn(msg) { if (live()) setStatus(msg, true); },
     error(msg) {
       if (!live() || asrFallback(id, msg)) return;
@@ -1957,7 +1989,7 @@ function asrOpen(id, cred, first, base = 0) {
     },
     closed(ok) {
       if (!live()) return;
-      if (!ok && recording && !stopRequested && asrFallback(id, `${ASR[id].label} 斷線了`)) return;
+      if (!ok && recording && !stopRequested && asrFallback(id, _("{v} 斷線了", { v: ASR[id].label }))) return;
       asr = null;
       cleanup();
     },
@@ -1989,8 +2021,8 @@ async function asrSwitch(to, why, base = startedAt ? Date.now() - startedAt : 0)
   const old = asr;
   asrGen++; asr = null; asrPending = [];
   old?.close();
-  showAlert(`${why}，改用 ${ASR[to].label} 接著錄；已收到的逐字稿都保留。`, "asr");
-  setStatus(`改用 ${ASR[to].label} 連線中…`);
+  showAlert(_("{why}，改用 {v} 接著錄；已收到的逐字稿都保留。", { why, v: ASR[to].label }), "asr");
+  setStatus(_("改用 {v} 連線中…", { v: ASR[to].label }));
   updateAsrSwap();
   let cred;
   try {
@@ -1999,9 +2031,9 @@ async function asrSwitch(to, why, base = startedAt ? Date.now() - startedAt : 0)
     if (!recording || asrPending === null) return;   // 等待中已經按了停止
     asrFailed.add(to);
     const next = asrAlternative(to);
-    if (next) return asrSwitch(next, `${ASR[to].label} 也連不上（${e.message}）`, base);
+    if (next) return asrSwitch(next, _("{v} 也連不上（{message}）", { v: ASR[to].label, message: e.message }), base);
     asrPending = null;
-    setStatus(`改用 ${ASR[to].label} 失敗：${e.message}`, true);
+    setStatus(_("改用 {v} 失敗：{message}", { v: ASR[to].label, message: e.message }), true);
     stop();
     return;
   }
@@ -2012,9 +2044,9 @@ async function asrSwitch(to, why, base = startedAt ? Date.now() - startedAt : 0)
 function updateAsrSwap() {
   const alt = recording && !importing && CLOUD.has(engineNow) && asr ? asrAlternative(engineNow, true) : null;
   $("asrSwap").hidden = !alt;
-  if (alt) { $("asrSwap").textContent = `改用 ${ASR[alt].label}`; $("asrSwap").dataset.to = alt; }
+  if (alt) { $("asrSwap").textContent = _("改用 {v}", { v: ASR[alt].label }); $("asrSwap").dataset.to = alt; }
 }
-$("asrSwap").onclick = () => { const to = $("asrSwap").dataset.to; if (to && recording) asrSwitch(to, "手動切換"); };
+$("asrSwap").onclick = () => { const to = $("asrSwap").dataset.to; if (to && recording) asrSwitch(to, _("手動切換")); };
 
 // ---- 金鑰保管箱畫面 ----
 let vaultEditing = null, vaultResetArmed = null;
@@ -2029,23 +2061,23 @@ function renderVault() {
   $("vaultOpenBox").hidden = !open;
   $("vaultPasskeyBtn").hidden = !vault.rec?.passkey || !passkeyOk();
   $("vaultPasskeyAdd").hidden = !passkeyOk() || !!vault.rec?.passkey;
-  if (vault.broken) setVaultNote("這個瀏覽器不能保存金鑰（可能是無痕模式），請換一般視窗", true);
+  if (vault.broken) setVaultNote(_("這個瀏覽器不能保存金鑰（可能是無痕模式），請換一般視窗"), true);
   const list = $("vaultList");
   list.replaceChildren();
   for (const id of CLOUD) {
     const li = document.createElement("li"), c = vault.secrets?.[id];
     const name = Object.assign(document.createElement("span"), { className: "vn", textContent: ASR[id].label });
     const st = Object.assign(document.createElement("span"), { className: "vk" });
-    st.textContent = c ? `已設定 …${String(c.key).slice(-4)}${c.region ? `（${c.region}）` : ""}` : "未設定";
+    st.textContent = c ? _("已設定 …{v}{v2}", { v: String(c.key).slice(-4), v2: c.region ? _("（{region}）", { region: c.region }) : "" }) : _("未設定");
     li.append(name, st);
     const btn = (label, act) => Object.assign(document.createElement("button"), { type: "button", className: "btn ghost", textContent: label, onclick: act });
-    li.append(btn(c ? "更換" : "設定", () => vaultEditStart(id)));
+    li.append(btn(c ? _("更換") : _("設定"), () => vaultEditStart(id)));
     if (c) {
-      li.append(btn("測試", async () => {
-        setVaultNote(`測試 ${ASR[id].label} 金鑰…`);
-        try { await ASR[id].test(vaultCred(id)); setVaultNote(`${ASR[id].label} 金鑰有效`); } catch (e) { setVaultNote(e.message, true); }
+      li.append(btn(_("測試"), async () => {
+        setVaultNote(_("測試 {v} 金鑰…", { v: ASR[id].label }));
+        try { await ASR[id].test(vaultCred(id)); setVaultNote(_("{v} 金鑰有效", { v: ASR[id].label })); } catch (e) { setVaultNote(e.message, true); }
       }));
-      li.append(btn("刪除", async () => { await vaultDel(id); setVaultNote(`已刪除 ${ASR[id].label} 金鑰`); renderVault(); }));
+      li.append(btn(_("刪除"), async () => { await vaultDel(id); setVaultNote(_("已刪除 {v} 金鑰", { v: ASR[id].label })); renderVault(); }));
     }
     list.append(li);
   }
@@ -2056,7 +2088,7 @@ function renderVault() {
 function vaultEditStart(id) {
   vaultEditing = id;
   $("vaultKey").value = "";
-  $("vaultKey").placeholder = `貼上 ${ASR[id].label} 的 ${ASR[id].fields[0].label}`;
+  $("vaultKey").placeholder = _("貼上 {v} 的 {v2}", { v: ASR[id].label, v2: ASR[id].fields[0].label });
   const region = ASR[id].fields.some((f) => f.id === "region");
   $("vaultRegion").hidden = !region;
   $("vaultRegion").value = region ? (vault.secrets?.[id]?.region || "") : "";
@@ -2067,34 +2099,34 @@ $("vaultCancel").onclick = () => { vaultEditing = null; $("vaultKey").value = ""
 $("vaultSave").onclick = async () => {
   const id = vaultEditing, key = $("vaultKey").value.trim(), region = $("vaultRegion").value.trim().toLowerCase();
   if (!id || !vaultIsOpen()) return;
-  if (key.length < 8 || /\s/.test(key)) { setVaultNote("金鑰看起來不完整", true); return; }
-  if (!$("vaultRegion").hidden && !/^[a-z0-9]{2,40}$/.test(region)) { setVaultNote("請填 Azure 資源的區域，例：eastasia", true); return; }
+  if (key.length < 8 || /\s/.test(key)) { setVaultNote(_("金鑰看起來不完整"), true); return; }
+  if (!$("vaultRegion").hidden && !/^[a-z0-9]{2,40}$/.test(region)) { setVaultNote(_("請填 Azure 資源的區域，例：eastasia"), true); return; }
   await vaultPut(id, $("vaultRegion").hidden ? { key } : { key, region });
   $("vaultKey").value = "";
   vaultEditing = null;
-  setVaultNote(`已加密保存 ${ASR[id].label} 金鑰；可以按「測試」確認`);
+  setVaultNote(_("已加密保存 {v} 金鑰；可以按「測試」確認", { v: ASR[id].label }));
   renderVault();
 };
 $("vaultCreate").onclick = async () => {
   const a = $("vaultPass1").value, b = $("vaultPass2").value;
-  if (a.length < 8) { setVaultNote("密語至少 8 個字", true); return; }
-  if (a !== b) { setVaultNote("兩次密語不一樣", true); return; }
+  if (a.length < 8) { setVaultNote(_("密語至少 8 個字"), true); return; }
+  if (a !== b) { setVaultNote(_("兩次密語不一樣"), true); return; }
   $("vaultCreate").disabled = true;
-  setVaultNote("建立中…");
+  setVaultNote(_("建立中…"));
   try {
     await vaultCreate(a);
     $("vaultPass1").value = $("vaultPass2").value = "";
-    setVaultNote("已建立。忘記密語就只能清除重設金鑰，請記好。");
-  } catch (e) { setVaultNote("建立失敗：" + e.message, true); }
+    setVaultNote(_("已建立。忘記密語就只能清除重設金鑰，請記好。"));
+  } catch (e) { setVaultNote(_("建立失敗：") + e.message, true); }
   $("vaultCreate").disabled = false;
   renderVault();
 };
 async function vaultTryUnlock(fn) {
-  setVaultNote("解鎖中…");
+  setVaultNote(_("解鎖中…"));
   try { await fn(); setVaultNote(""); } catch (e) {
     // 忘記密語（或別台裝置用了不同密語）時告訴使用者可以清除重設（#115）
-    const hint = e.message === "密語不對" ? "。忘記密語的話，可以按「忘記密語？清除保管箱」重設，金鑰到 Soniox／Azure 後台重新複製" : "";
-    setVaultNote(e.name === "NotAllowedError" ? "已取消" : e.message + hint, true);
+    const hint = e.message === _("密語不對") ? _("。忘記密語的話，可以按「忘記密語？清除保管箱」重設，金鑰到 Soniox／Azure 後台重新複製") : "";
+    setVaultNote(e.name === "NotAllowedError" ? _("已取消") : e.message + hint, true);
   }
   renderVault();
 }
@@ -2103,19 +2135,19 @@ $("vaultPass").onkeydown = (e) => { if (e.key === "Enter") $("vaultUnlock").clic
 $("vaultPasskeyBtn").onclick = () => vaultTryUnlock(vaultUnlockPasskey);
 $("vaultLockBtn").onclick = () => {
   // 錄音中還要用金鑰（Azure 續 token、斷線改用別家），停止後再鎖
-  if (recording) { setVaultNote("錄音中不能上鎖，停止錄音後再鎖", true); return; }
+  if (recording) { setVaultNote(_("錄音中不能上鎖，停止錄音後再鎖"), true); return; }
   vaultLock();
-  setVaultNote("已上鎖");
+  setVaultNote(_("已上鎖"));
 };
 $("vaultPasskeyAdd").onclick = () => { $("vaultPkRow").hidden = false; $("vaultPkPass").focus(); };
 $("vaultPkCancel").onclick = () => { $("vaultPkRow").hidden = true; $("vaultPkPass").value = ""; };
 $("vaultPkGo").onclick = async () => {
-  setVaultNote("請依瀏覽器指示建立 passkey…");
+  setVaultNote(_("請依瀏覽器指示建立 passkey…"));
   try {
     await vaultAddPasskey($("vaultPkPass").value);
     $("vaultPkRow").hidden = true;
-    setVaultNote("已加上 passkey，下次可以用 Face ID／Touch ID 解鎖");
-  } catch (e) { setVaultNote(e.name === "NotAllowedError" ? "已取消" : e.message, true); }
+    setVaultNote(_("已加上 passkey，下次可以用 Face ID／Touch ID 解鎖"));
+  } catch (e) { setVaultNote(e.name === "NotAllowedError" ? _("已取消") : e.message, true); }
   $("vaultPkPass").value = "";
   renderVault();
 };
@@ -2123,13 +2155,13 @@ $("vaultPkGo").onclick = async () => {
 async function vaultResetClick(btn) {
   if (vaultResetArmed?.btn !== btn || Date.now() - vaultResetArmed.at > 5000) {
     vaultResetArmed = { btn, at: Date.now() };
-    setVaultNote(`再按一次「${$(btn).textContent}」就會刪掉這台裝置上所有轉錄金鑰`, true);
+    setVaultNote(_("再按一次「{v}」就會刪掉這台裝置上所有轉錄金鑰", { v: $(btn).textContent }), true);
     return;
   }
   vaultResetArmed = null;
   await vaultReset();
   $("vaultPass").value = "";
-  setVaultNote("已清除，可以重新建立");
+  setVaultNote(_("已清除，可以重新建立"));
   renderVault();
 }
 $("vaultReset").onclick = () => vaultResetClick("vaultReset");
@@ -2145,10 +2177,10 @@ const LOCAL_POST_BYTES = TARGET_RATE * 2;   // 約 1 秒送一次
 
 function updateEngineNote() {
   const v = $("engine").value, local = !CLOUD.has(v);
-  const mine = keyMode === "client" ? (vault.rec?.entries?.[v] ? "，金鑰在這台裝置" : "；還沒設定金鑰，請在下面設定") : "";
+  const mine = keyMode === "client" ? (vault.rec?.entries?.[v] ? _("，金鑰在這台裝置") : _("；還沒設定金鑰，請在下面設定")) : "";
   $("engineNote").textContent = local
-    ? `語音只在${hostName}上辨識，不連 Soniox；勾「AI 整理」時，辨識出的文字仍會送 Claude`
-    : v === "azure" ? `語音即時送 Azure 語音服務轉錄（zh-TW）${mine}` : `語音即時送 Soniox 轉錄（Soniox 不保存音檔）${mine}`;
+    ? _("語音只在{host}上辨識，不連 Soniox；勾「AI 整理」時，辨識出的文字仍會送 Claude", { host: hostName })
+    : v === "azure" ? _("語音即時送 Azure 語音服務轉錄（zh-TW）{mine}", { mine }) : _("語音即時送 Soniox 轉錄（Soniox 不保存音檔）{mine}", { mine });
   $("ep").disabled = local;
   $("azDiarBox").hidden = v !== "azure";
 }
@@ -2158,13 +2190,13 @@ function updateEngineNote() {
 let hostErr = "";   // 空字串＝上次問到了；有字＝上次連不到的原因（給使用者看）
 let hostAsked = false;
 const hostDownText = (e) => e instanceof TypeError
-  ? `連不到${hostName}。手機或平板請先打開 Tailscale、確認已連線，再按「重試」`
-  : `${hostName}沒有正常回應（${e.message}），請稍後再按「重試」`;
+  ? _("連不到{host}。手機或平板請先打開 Tailscale、確認已連線，再按「重試」", { host: hostName })
+  : _("{host}沒有正常回應（{message}），請稍後再按「重試」", { host: hostName, message: e.message });
 async function loadEngines() {
   let list = [];
   try {
     const r = await fetch(api("/api/engines"));
-    if (!r.ok) throw new Error(`狀態碼 ${r.status}`);
+    if (!r.ok) throw new Error(_("狀態碼 {status}", { status: r.status }));
     const j = await r.json();
     list = j.engines || [];
     keyMode = j.key_mode === "client" ? "client" : "server";
@@ -2172,7 +2204,7 @@ async function loadEngines() {
   } catch (e) { list = []; hostErr = hostDownText(e); }
   hostAsked = true;
   if (!hostErr) hideAlert("host");
-  else if (!recording && !importing) showAlert(hostErr, "host", { label: "重試", run: retryHost });
+  else if (!recording && !importing) showAlert(hostErr, "host", { label: _("重試"), run: retryHost });
   if (keyMode === "client" && !vault.loaded) await vaultLoad();
   renderVault();
   const sel = $("engine");
@@ -2180,7 +2212,7 @@ async function loadEngines() {
   for (const e of list) {
     const o = document.createElement("option");
     o.value = e.id;
-    o.textContent = e.ok ? e.label : `${e.label}（${e.reason === "unsupported" ? "這台主機不支援" : "未安裝"}）`;
+    o.textContent = e.ok ? e.label : _("{label}（{v}）", { label: e.label, v: e.reason === "unsupported" ? _("這台主機不支援") : _("未安裝") });
     o.disabled = !e.ok;
     sel.append(o);
   }
@@ -2194,7 +2226,7 @@ const hostReady = async () => (hostAsked && !hostErr) || loadEngines();
 let hostRetrying = null;
 function retryHost() {
   if (hostRetrying) return hostRetrying;
-  $("alertAct").textContent = "重試中…";
+  $("alertAct").textContent = _("重試中…");
   hostRetrying = Promise.all([loadHostName(), loadEngines()]).finally(() => { hostRetrying = null; });
   return hostRetrying;
 }
@@ -2207,9 +2239,9 @@ $("engine").onchange = () => { store.set("ms.engine", $("engine").value); update
 
 // 分頁／系統聲音只有桌機 Chrome／Edge 支援；iPhone 沒有 getDisplayMedia，就不顯示選單
 const SOURCE_NOTES = {
-  tab: "按開始後選要分享的 Chrome 分頁（例如線上研習），並打開「同時分享分頁音訊」。只收那個分頁的聲音，不收麥克風。",
-  sys: "按開始後選「整個螢幕」，並打開「同時分享系統音訊」。整台電腦的聲音都會收（Zoom、Teams、YouTube、其他 App），不收麥克風。",
-  mix: "按開始後選要分享的 Chrome 分頁（打開分享分頁音訊），或選「整個螢幕」（打開分享系統音訊）。請戴耳機，否則喇叭的聲音會被麥克風再收一次。",
+  tab: _("按開始後選要分享的 Chrome 分頁（例如線上研習），並打開「同時分享分頁音訊」。只收那個分頁的聲音，不收麥克風。"),
+  sys: _("按開始後選「整個螢幕」，並打開「同時分享系統音訊」。整台電腦的聲音都會收（Zoom、Teams、YouTube、其他 App），不收麥克風。"),
+  mix: _("按開始後選要分享的 Chrome 分頁（打開分享分頁音訊），或選「整個螢幕」（打開分享系統音訊）。請戴耳機，否則喇叭的聲音會被麥克風再收一次。"),
 };
 function updateSourceNote() {
   const v = $("source").value;
@@ -2246,7 +2278,7 @@ function sendLocal(buf, force = false) {
     if (r.ok) { localAcceptedMs += body.length / 32; return; }   // 16 kHz s16：每毫秒 32 bytes
     if (!localFailed && mid === meetingId) {
       localFailed = true;
-      setStatus("本機辨識中斷：" + r.error, true);
+      setStatus(_("本機辨識中斷：") + r.error, true);
       stop();
     }
   }).catch(() => {});
@@ -2258,7 +2290,7 @@ async function postLocalAudio(mid, body, seq) {
   try {
     r = await fetch(api(`/api/local/audio?meeting=${mid}&seq=${seq}`), { method: "POST", headers: localHeaders, body });
   } catch (err) {
-    return { ok: false, transient: true, error: `連不到${hostName}` };
+    return { ok: false, transient: true, error: _("連不到{host}", { host: hostName }) };
   }
   if (r.ok) return { ok: true };
   const j = await r.json().catch(() => ({}));
@@ -2268,9 +2300,9 @@ async function postLocalAudio(mid, body, seq) {
 // 服務重啟後同一場重新開始：時間接在已送過的音訊後面，事件連線斷了就重開（#74）
 const LOCAL_RESUME_MS = 90000;
 async function resumeLocal(mid, body, seq) {
-  showAlert(`${hostName}的服務剛重新啟動，正在自動接回。錄音沒有停，這段時間的聲音先存在這台，接回後會補上。`, "resume");
+  showAlert(_("{host}的服務剛重新啟動，正在自動接回。錄音沒有停，這段時間的聲音先存在這台，接回後會補上。", { host: hostName }), "resume");
   const deadline = Date.now() + LOCAL_RESUME_MS;
-  let last = { ok: false, error: `${hostName}一直沒有恢復` };
+  let last = { ok: false, error: _("{host}一直沒有恢復", { host: hostName }) };
   while (Date.now() < deadline && !localFailed && mid === meetingId) {
     await new Promise((res) => setTimeout(res, 3000));
     let s;
@@ -2291,7 +2323,7 @@ async function resumeLocal(mid, body, seq) {
         localEvt = new EventSource(api(`/api/local/events?meeting=${mid}`));
         localEvt.onmessage = onLocalEvent;
       }
-      showAlert("已自動接回，字幕會繼續出現。", "resume");
+      showAlert(_("已自動接回，字幕會繼續出現。"), "resume");
       setTimeout(() => hideAlert("resume"), 6000);
       return r;
     }
@@ -2311,9 +2343,9 @@ function onLocalEvent(e) {
     // Whisper 每 5 秒切一段，段落不等於句子：只在句尾標點或停頓換句，片段之間補標點接起來
     ev.tokens.forEach((t, i) => {
       // Whisper 常在中文後面用半形標點，換成全形
-      const fixed = t.text.replace(/([\u3400-\u9fff]),/g, "$1，").replace(/([\u3400-\u9fff])\?/g, "$1？").replace(/([\u3400-\u9fff])!/g, "$1！");
+      const fixed = t.text.replace(/([\u3400-\u9fff]),/g, "$1，").replace(/([\u3400-\u9fff])\?/g, "$1？").replace(/([\u3400-\u9fff])!/g, "$1！");   // 不翻：標點處理
       const cjk = /[\u3400-\u9fff]$/.test(fixed), last = ev.pause && i === ev.tokens.length - 1;
-      const text = /[。！？!?，,.、；;：:]$/.test(fixed) ? fixed : fixed + (cjk ? (last ? "。" : "，") : " ");
+      const text = /[。！？!?，,.、；;：:]$/.test(fixed) ? fixed : fixed + (cjk ? (last ? "。" : "，") : " ");   // 不翻：標點處理
       finals.push({ text, start: t.start == null ? t.start : t.start + tOffset });
     });
     if (ev.pause) finals.push({ text: "<end>" });
@@ -2340,11 +2372,11 @@ function onLocalEvent(e) {
   } else if (ev.type === "error" && ev.fatal) {
     if (!importing?.cancelled) setStatus(ev.error, true);
   } else if (ev.type === "error") {
-    setStatus(ev.error + "（這一段跳過，錄音繼續）", true);
+    setStatus(ev.error + _("（這一段跳過，錄音繼續）"), true);
   } else if (ev.type === "done") {
     localEvt.close();
     localEvt = null;
-    if ($("status").className !== "err") setStatus("已結束，可以下載逐字稿");
+    if ($("status").className !== "err") setStatus(_("已結束，可以下載逐字稿"));
     cleanup();
   }
 }
@@ -2357,7 +2389,7 @@ async function startLocal(engine) {
     const j = await r.json().catch(() => ({}));
     stopAudio();
     $("btn").disabled = false;
-    setStatus("本機引擎無法啟動：" + (j.error || r.status), true);
+    setStatus(_("本機引擎無法啟動：") + (j.error || r.status), true);
     return;
   }
   if (localEvt) localEvt.close();
@@ -2367,7 +2399,7 @@ async function startLocal(engine) {
     await startAudio((buf) => sendLocal(buf));
   } catch (e) {
     stopAudio();
-    setStatus("收音無法啟動：" + e.message, true);
+    setStatus(_("收音無法啟動：") + e.message, true);
     postJson("/api/local/end", { meeting: meetingId }).catch(() => {});
     return;
   }
@@ -2417,12 +2449,12 @@ function summaryMarkdown() {
 function renderSummary() {
   const note = $("sumNote");
   note.className = "hint" + (sumError ? " err" : "");
-  if (sumBusy || (sumPending && !summary)) note.textContent = "AI 正在產生會後總結…（長會議要一兩分鐘）";
-  else if (sumError) note.textContent = `總結失敗：${sumError}。字幕與存檔不受影響，可以按「重新產生總結」。`;
-  else if (summary) note.textContent = "點章節時間可以跳到逐字稿那一段。";
-  else if (meetingId && !aiOn && !chunks.size) note.textContent = "這場沒有開「AI 整理」，沒有總結。";
-  else if (aiEnded && !chunks.size) note.textContent = "這場沒有送出段落，沒有總結。";
-  else note.textContent = "會議結束後，AI 會整理出簡介與分段章節、完整總結、短總結，每一頁都能複製。";
+  if (sumBusy || (sumPending && !summary)) note.textContent = _("AI 正在產生會後總結…（長會議要一兩分鐘）");
+  else if (sumError) note.textContent = _("總結失敗：{sumError}。字幕與存檔不受影響，可以按「重新產生總結」。", { sumError });
+  else if (summary) note.textContent = _("點章節時間可以跳到逐字稿那一段。");
+  else if (meetingId && !aiOn && !chunks.size) note.textContent = _("這場沒有開「AI 整理」，沒有總結。");
+  else if (aiEnded && !chunks.size) note.textContent = _("這場沒有送出段落，沒有總結。");
+  else note.textContent = _("會議結束後，AI 會整理出簡介與分段章節、完整總結、短總結，每一頁都能複製。");
   $("sumRetry").hidden = recording || sumBusy || sumPending || !chunks.size || !(summary || sumError);
   $("sumBar").hidden = !summary;
   const body = $("sumBody");
@@ -2436,7 +2468,7 @@ function renderSummary() {
     body.append(p);
     if ((summary.chapters || []).length) {
       const h = document.createElement("h4");
-      h.textContent = "[ 分段章節 ]";
+      h.textContent = _("[ 分段章節 ]");
       body.append(h);
       for (const c of summary.chapters) {
         const b = document.createElement("button");
@@ -2491,7 +2523,7 @@ async function copyText(text, btn) {
   let ok = false;
   try { await navigator.clipboard.writeText(text); ok = true; } catch (e) { ok = fallbackCopy(text); }
   const label = btn.dataset.label || (btn.dataset.label = btn.textContent);
-  btn.textContent = ok ? "已複製" : "複製失敗，請手動選取";
+  btn.textContent = ok ? _("已複製") : _("複製失敗，請手動選取");
   setTimeout(() => { btn.textContent = label; }, 1500);
 }
 
@@ -2518,7 +2550,7 @@ async function resummarize() {
   } catch (e) {
     if (mid !== meetingId) return;
     sumBusy = false;
-    showSummary({ error: "連不到伺服器" });
+    showSummary({ error: _("連不到伺服器") });
   } finally {
     if (mid === meetingId) { sumBusy = false; renderSummary(); }
   }
@@ -2533,7 +2565,7 @@ $("sumRetry").onclick = resummarize;
 let minutes = null, minBusy = false, minError = "";
 // 送到 Redmine（#82）的狀態；renderMinutes 會用到，所以宣告在這裡
 let redmineReady = false, rmBusy = false, rmError = "";
-const MIN_STATUS = ["未開始", "進行中", "已完成"];
+const MIN_STATUS = ["未開始", "進行中", "已完成"];   // 不翻：存進會議紀錄的狀態值，畫面另外翻
 
 function resetMinutes() {
   minutes = null; minBusy = false; minError = "";
@@ -2550,10 +2582,12 @@ function localDate(d) {
 
 // 期限顯示成「10/23（四）」；逐字稿的說法（下週三前）放在後面
 function dueLabel(a) {
-  if (!a.due) return a.due_text || "未定";
+  if (!a.due) return a.due_text || _("未定");
   const [y, m, d] = a.due.split("-").map(Number);
-  const wd = "日一二三四五六"[new Date(y, m - 1, d).getDay()];
-  return `${m}/${d}（${wd}）` + (a.due_text ? ` ${a.due_text}` : "");
+  const day = new Date(y, m - 1, d);
+  const label = UI_LANG === "en" ? day.toLocaleDateString("en-US", { weekday: "short", month: "numeric", day: "numeric" })
+    : `${m}/${d}（${"日一二三四五六"[day.getDay()]}）`;   // 不翻：中文介面的日期寫法
+  return label + (a.due_text ? ` ${a.due_text}` : "");
 }
 
 function minutesParas() {
@@ -2569,13 +2603,13 @@ function renderMinutes() {
   if (box.hidden) return;
   const note = $("minNote");
   note.className = "hint" + (minError ? " err" : "");
-  if (minBusy) note.textContent = "AI 正在整理會議紀錄…（約一分鐘）";
-  else if (minError) note.textContent = `會議紀錄失敗：${minError}。可以再按一次。`;
-  else if (minutes) note.textContent = `${minutes.title}｜${minutes.date}。待辦依期限排序；狀態可以直接改，複製和存 Drive 會照你改的。`;
-  else note.textContent = "選模板後按「產生會議紀錄」：待辦（事項、負責人、期限、狀態）、決議、待釐清的問題。";
+  if (minBusy) note.textContent = _("AI 正在整理會議紀錄…（約一分鐘）");
+  else if (minError) note.textContent = _("會議紀錄失敗：{minError}。可以再按一次。", { minError });
+  else if (minutes) note.textContent = _("{title}｜{date}。待辦依期限排序；狀態可以直接改，複製和存 Drive 會照你改的。", { title: minutes.title, date: minutes.date });
+  else note.textContent = _("選模板後按「產生會議紀錄」：待辦（事項、負責人、期限、狀態）、決議、待釐清的問題。");
   // 送 Redmine 時不能重新產生：新紀錄會比送出結果先到，就記不到任務編號，下次多建一筆
   $("minGo").disabled = minBusy || rmBusy;
-  $("minGo").textContent = minutes ? "重新產生" : "產生會議紀錄";
+  $("minGo").textContent = minutes ? _("重新產生") : _("產生會議紀錄");
   $("minCopy").hidden = !minutes;
   renderRedmine();
   const body = $("minBody");
@@ -2584,32 +2618,32 @@ function renderMinutes() {
   const add = (tag, text, parent = body) => { const el = document.createElement(tag); if (text != null) el.textContent = text; parent.append(el); return el; };
   const list = (title, items) => {
     add("h4", title);
-    if (!items.length) { add("p", "（沒有）"); return; }
+    if (!items.length) { add("p", _("（沒有）")); return; }
     const ul = add("ul");
     for (const x of items) add("li", x, ul);
   };
-  add("h4", "待辦事項");
-  if (!minutes.actions.length) add("p", "（逐字稿裡沒有提到待辦）");
+  add("h4", _("待辦事項"));
+  if (!minutes.actions.length) add("p", _("（逐字稿裡沒有提到待辦）"));
   else {
     const table = add("table");
     table.className = "minTable";
     const hr = add("tr", null, add("thead", null, table));
-    for (const h of ["事項", "負責人", "期限", "狀態"]) add("th", h, hr);
+    for (const h of [_("事項"), _("負責人"), _("期限"), _("狀態")]) add("th", h, hr);
     const tbody = add("tbody", null, table);
     const today = localDate(new Date());
     minutes.actions.forEach((a, i) => {
       const tr = add("tr", null, tbody);
-      if (a.status === "已完成") tr.className = "done";
+      if (a.status === "已完成") tr.className = "done";   // 不翻：狀態值
       else if (a.due && a.due < today) tr.className = "overdue";
       add("td", a.item, tr);
       add("td", a.owner || "—", tr);
-      const due = add("td", dueLabel(a) + (tr.className === "overdue" ? "・已過期" : ""), tr);
+      const due = add("td", dueLabel(a) + (tr.className === "overdue" ? _("・已過期") : ""), tr);
       due.className = "due";
       const st = add("td", null, tr);
       st.className = "st";
       const sel = add("select", null, st);
-      sel.setAttribute("aria-label", `「${a.item}」的狀態`);
-      for (const v of MIN_STATUS) { const o = add("option", v, sel); o.value = v; }
+      sel.setAttribute("aria-label", _("「{item}」的狀態", { item: a.item }));
+      for (const v of MIN_STATUS) { const o = add("option", _(v), sel); o.value = v; }
       sel.value = a.status;
       sel.onchange = () => {
         minutes.actions[i].status = sel.value;
@@ -2619,11 +2653,11 @@ function renderMinutes() {
       };
     });
   }
-  list("決議", minutes.decisions);
-  list("待釐清的問題", minutes.questions);
-  if (minutes.summary) { add("h4", "摘要"); add("p", minutes.summary); }
+  list(_("決議"), minutes.decisions);
+  list(_("待釐清的問題"), minutes.questions);
+  if (minutes.summary) { add("h4", _("摘要")); add("p", minutes.summary); }
   if (minutes.sections.length) {
-    add("h4", "討論重點");
+    add("h4", _("討論重點"));
     for (const sec of minutes.sections) {
       add("h5", sec.title);
       const ul = add("ul");
@@ -2635,17 +2669,17 @@ function renderMinutes() {
 // 複製與存 Drive 的 minutes.md；表格欄位裡的 | 和換行要處理，不然表格會跑掉
 function minutesMarkdown() {
   const cell = (t) => String(t || "").replace(/\|/g, "\\|").replace(/\s*\n\s*/g, " ");
-  const due = (a) => a.due ? a.due + (a.due_text ? `（${a.due_text}）` : "") : (a.due_text || "未定");
-  const items = (xs) => xs.length ? xs.map((x) => `- ${x}`).join("\n") : "（沒有）";
+  const due = (a) => a.due ? a.due + (a.due_text ? `（${a.due_text}）` : "") : (a.due_text || "未定");   // 不翻：會議紀錄檔案內容（產出語言在 #194 切片 4）
+  const items = (xs) => xs.length ? xs.map((x) => `- ${x}`).join("\n") : "（沒有）";   // 不翻：會議紀錄檔案內容
   const rows = minutes.actions.map((a) => `| ${cell(a.item)} | ${cell(a.owner) || "—"} | ${cell(due(a))} | ${a.status} |`);
   const parts = [
-    `# 會議紀錄：${minutes.title}`, `日期：${minutes.date}` + (meetingPlace ? `\n地點：${meetingPlace}` : "") + (meetingTitle ? `\n會議：${meetingTitle}` : ""),
-    "## 待辦事項", rows.length ? ["| 事項 | 負責人 | 期限 | 狀態 |", "| --- | --- | --- | --- |", ...rows].join("\n") : "（沒有）",
-    "## 決議", items(minutes.decisions),
-    "## 待釐清的問題", items(minutes.questions),
+    `# 會議紀錄：${minutes.title}`, `日期：${minutes.date}` + (meetingPlace ? `\n地點：${meetingPlace}` : "") + (meetingTitle ? `\n會議：${meetingTitle}` : ""),   // 不翻：會議紀錄檔案內容
+    "## 待辦事項", rows.length ? ["| 事項 | 負責人 | 期限 | 狀態 |", "| --- | --- | --- | --- |", ...rows].join("\n") : "（沒有）",   // 不翻：會議紀錄檔案內容
+    "## 決議", items(minutes.decisions),   // 不翻：會議紀錄檔案內容
+    "## 待釐清的問題", items(minutes.questions),   // 不翻：會議紀錄檔案內容
   ];
-  if (minutes.summary) parts.push("## 摘要", minutes.summary);
-  if (minutes.sections.length) parts.push("## 討論重點", minutes.sections.map((x) => `### ${x.title}\n\n${items(x.points)}`).join("\n\n"));
+  if (minutes.summary) parts.push("## 摘要", minutes.summary);   // 不翻：會議紀錄檔案內容
+  if (minutes.sections.length) parts.push("## 討論重點", minutes.sections.map((x) => `### ${x.title}\n\n${items(x.points)}`).join("\n\n"));   // 不翻：會議紀錄檔案內容
   return parts.join("\n\n") + "\n";
 }
 
@@ -2665,7 +2699,7 @@ async function genMinutes() {
     // 重新產生後仍是同一場會議：記住已送過的 Redmine 任務，再送是更新同一筆
     if (r.ok) { if (minutes?.redmine) j.redmine = minutes.redmine; minutes = mapStrings(j, fixNames); extraUsage = addUsage(extraUsage, j.usage); renderUsage(); saveAiSoon(); } else minError = j.error || `HTTP ${r.status}`;
   } catch (e) {
-    if (mid === meetingId) minError = "連不到伺服器";
+    if (mid === meetingId) minError = _("連不到伺服器");
   } finally {
     if (mid === meetingId) { minBusy = false; renderMinutes(); }
   }
@@ -2699,17 +2733,17 @@ function renderRedmine() {
   const sent = minutes.redmine;
   if (sent?.student && !$("rmName").value) $("rmName").value = sent.student;
   $("rmGo").disabled = rmBusy;
-  $("rmGo").textContent = sent ? "更新 Redmine" : "送到 Redmine";
+  $("rmGo").textContent = sent ? _("更新 Redmine") : _("送到 Redmine");
   note.className = "hint" + (rmError ? " err" : "");
   note.textContent = "";
   const masked = maskName($("rmName").value.trim());
-  if (rmBusy) note.textContent = "送到 Redmine…";
-  else if (rmError) note.textContent = `送到 Redmine 失敗：${rmError}。可以再按一次${sent ? "，會接著補，不會多一筆" : ""}。`;
+  if (rmBusy) note.textContent = _("送到 Redmine…");
+  else if (rmError) note.textContent = _("送到 Redmine 失敗：{rmError}。可以再按一次{v}。", { rmError, v: sent ? _("，會接著補，不會多一筆") : "" });
   else if (sent) {
     const a = document.createElement("a");
     a.href = sent.url; a.target = "_blank"; a.rel = "noopener noreferrer"; a.textContent = `#${sent.id}`;
-    note.append("已送到 Redmine ", a, `（${sent.msg}）。改了會議紀錄再按一次會更新同一筆，只補新的待辦。`);
-  } else note.textContent = "一場會議一筆，待辦是底下的子任務，全部指派給你" + (masked ? `；名字會寫成「${masked}」。` : "。");
+    note.append(_("已送到 Redmine "), a, _("（{msg}）。改了會議紀錄再按一次會更新同一筆，只補新的待辦。", { msg: sent.msg }));
+  } else note.textContent = _("一場會議一筆，待辦是底下的子任務，全部指派給你") + (masked ? _("；名字會寫成「{masked}」。", { masked }) : _("。"));
 }
 
 async function sendRedmine() {
@@ -2724,13 +2758,13 @@ async function sendRedmine() {
     });
     const j = await r.json().catch(() => ({}));
     if (j.id) {
-      const msg = !r.ok ? "還有待辦沒送完" : j.updated ? `已更新，新增 ${j.created} 筆待辦` : `${j.total} 筆待辦`;
+      const msg = !r.ok ? _("還有待辦沒送完") : j.updated ? _("已更新，新增 {created} 筆待辦", { created: j.created }) : _("{total} 筆待辦", { total: j.total });
       m.redmine = { id: j.id, url: j.url, student, msg };
       saveAiSoon();
     }
     if (!r.ok) rmError = j.error || `HTTP ${r.status}`;
   } catch (e) {
-    rmError = "連不到伺服器";
+    rmError = _("連不到伺服器");
   } finally {
     rmBusy = false;
     renderMinutes();
@@ -2755,7 +2789,7 @@ fetch(api("/api/forms")).then((r) => r.json()).then((j) => {
   }
   // 只有一個擴充包時用它的名稱當區塊標題（例如「IEP 會議紀錄（簽名版）」）
   const titles = [...new Set(list.map((t) => t.forms_title))];
-  $("formHead").textContent = titles.length === 1 ? titles[0] : "表單紀錄（簽名版）";
+  $("formHead").textContent = titles.length === 1 ? titles[0] : _("表單紀錄（簽名版）");
   const last = store.get("ms.formTpl", "") || store.get("ms.iepTpl", "");   // 舊版存在 ms.iepTpl
   if (formSchemas[last]) sel.value = last;
   if (form && formSchemas[form.template]) sel.value = form.template;
@@ -2803,14 +2837,14 @@ function formFilled(it) {
 function renderFormNote() {
   const note = $("formNote");
   note.className = "hint" + (formError ? " err" : "");
-  if (formBusy) note.textContent = "AI 正在依逐字稿填表…（約一分鐘）";
-  else if (formError) note.textContent = `失敗：${formError}。可以再按一次。`;
-  else if (form?.switched) note.textContent = "換了會議別：相同的欄位已經沿用，其餘請按「AI 重新填寫」或自己補。";
-  else if (form) note.textContent = "請逐項確認：AI 只勾逐字稿談到的項目，基本資料要自己核對。「下載 Word」照範本的表頭與簽名欄，內容只寫有勾的項目（寫成文字，不印勾選框），用 Word 開啟列印給與會者簽名；存到 Drive 時也會一起存。";
-  else note.textContent = "選會議別後按「AI 填寫」：照範本的表格填好說明與勾選，你確認後下載 Word 簽名。";
+  if (formBusy) note.textContent = _("AI 正在依逐字稿填表…（約一分鐘）");
+  else if (formError) note.textContent = _("失敗：{formError}。可以再按一次。", { formError });
+  else if (form?.switched) note.textContent = _("換了會議別：相同的欄位已經沿用，其餘請按「AI 重新填寫」或自己補。");
+  else if (form) note.textContent = _("請逐項確認：AI 只勾逐字稿談到的項目，基本資料要自己核對。「下載 Word」照範本的表頭與簽名欄，內容只寫有勾的項目（寫成文字，不印勾選框），用 Word 開啟列印給與會者簽名；存到 Drive 時也會一起存。");
+  else note.textContent = _("選會議別後按「AI 填寫」：照範本的表格填好說明與勾選，你確認後下載 Word 簽名。");
   const asking = formAsk > Date.now();
   $("formGo").disabled = formBusy;
-  $("formGo").textContent = asking ? "再按一次：蓋掉你的修改" : form ? "AI 重新填寫" : "AI 填寫";
+  $("formGo").textContent = asking ? _("再按一次：蓋掉你的修改") : form ? _("AI 重新填寫") : _("AI 填寫");
   $("formDl").hidden = !form;
   $("formDl").disabled = formBusy;
   renderFormWarn();
@@ -2819,7 +2853,7 @@ function renderFormNote() {
 // 表頭年級：數字或國字（三年級、六）
 function formGrade(t) {
   const x = String(t || "").trim(), d = x.match(/\d+/);
-  return d ? Number(d[0]) : "一二三四五六七八九".indexOf(x[0]) + 1;
+  return d ? Number(d[0]) : "一二三四五六七八九".indexOf(x[0]) + 1;   // 不翻：表單編號
 }
 // 提醒：本體只內建「有勾但沒寫摘要」；其他（例如縣府檢核要求的必填項目）由擴充包用條件宣告，缺了只提醒，不擋下載
 // 條件：{empty: 欄位} 說明沒寫、{off: 欄位} 沒勾、{grade_in: [年級…]} 表頭的年級在清單裡；同一條的條件都成立才提醒
@@ -2828,7 +2862,7 @@ function formWarnings() {
   if (!s) return [];
   const items = form.values.items || {}, get = (id) => items[id] || {}, out = [];
   for (const g of s.report) for (const it of g.items) {
-    if (it.kind === "check" && get(it.id).on && !(get(it.id).text || "").trim()) out.push(`「${it.label}」有勾但還沒寫摘要`);
+    if (it.kind === "check" && get(it.id).on && !(get(it.id).text || "").trim()) out.push(_("「{label}」有勾但還沒寫摘要", { label: it.label }));
   }
   const grade = formGrade(form.values.header?.grade);
   const ok = (c) => ("empty" in c ? !(get(c.empty).text || "").trim()
@@ -2871,7 +2905,7 @@ function renderFormBody() {
   };
 
   const head = form.values.header ||= {};
-  fields.append(mk("h4", { textContent: "基本資料" }));
+  fields.append(mk("h4", { textContent: _("基本資料") }));
   const grid = mk("div", { className: "ihead" });
   for (const f of s.header) {
     const input = text(head[f.id], f.label, 80, (x) => { head[f.id] = x; if (s.header_defaults?.[f.id] === "remember") store.set(formRemember(s, f.id), x.trim()); });
@@ -2899,22 +2933,22 @@ function renderFormBody() {
     tick = () => { if (!v.on) { v.on = box.checked = true; onCount(); } };
     wrap.append(mk("label", { className: "ichk" }, box, mk("span", { textContent: it.label })));
     sub.hidden = !v.on;
-    if (it.text) sub.append(area(`${it.label}：摘要`));
+    if (it.text) sub.append(area(_("{label}：摘要", { label: it.label })));
     if (it.choose) {
-      const sel = mk("select", {}, mk("option", { value: "", textContent: it.choose.join("／") + "？" }), ...it.choose.map((c) => mk("option", { value: c, textContent: c })));
+      const sel = mk("select", {}, mk("option", { value: "", textContent: it.choose.join("／") + "？" }), ...it.choose.map((c) => mk("option", { value: c, textContent: c })));   // 不翻：表單範本的選項是中文
       sel.value = v.mode || "";
-      sel.setAttribute("aria-label", `${it.label}：${it.choose.join("或")}`);
+      sel.setAttribute("aria-label", `${it.label}：${it.choose.join("或")}`);   // 不翻：表單範本的選項是中文
       sel.onchange = () => { v.mode = sel.value; if (sel.value) tick(); changed(); };
       sub.append(sel);
     }
     for (const b of it.blanks) {
       sub.append(mk("label", { className: "iblank" }, b.label,
-        text(v.blanks[b.id], `${it.label}：${b.label}`, 80, (x) => { v.blanks[b.id] = x; if (x.trim()) tick(); })));
+        text(v.blanks[b.id], _("{label}：{label2}", { label: it.label, label2: b.label }), 80, (x) => { v.blanks[b.id] = x; if (x.trim()) tick(); })));
     }
     for (const o of it.options) {
       let extra = null;
       const ob = mk("input", { type: "checkbox", checked: !!v.options[o.label] });
-      ob.setAttribute("aria-label", `${it.label}：${o.label}`);
+      ob.setAttribute("aria-label", _("{label}：{label2}", { label: it.label, label2: o.label }));
       const set = () => {
         const x = extra ? extra.value.trim() : "";
         if (ob.checked) { v.options[o.label] = x || true; tick(); } else delete v.options[o.label];
@@ -2924,12 +2958,12 @@ function renderFormBody() {
       const lab = mk("label", { className: "iopt" }, ob, o.label);
       const cur = typeof v.options[o.label] === "string" ? v.options[o.label] : "";
       if (o.blank) {
-        extra = text(cur, `${it.label}：${o.label}的內容`, 80, () => {});
+        extra = text(cur, _("{label}：{label2}的內容", { label: it.label, label2: o.label }), 80, () => {});
         extra.oninput = () => { if (extra.value.trim()) ob.checked = true; set(); };
       } else if (o.choose) {
-        extra = mk("select", {}, mk("option", { value: "", textContent: "（類別）" }), ...o.choose.map((c) => mk("option", { value: c, textContent: c })));
+        extra = mk("select", {}, mk("option", { value: "", textContent: _("（類別）") }), ...o.choose.map((c) => mk("option", { value: c, textContent: c })));
         extra.value = cur;
-        extra.setAttribute("aria-label", `${o.label}的類別`);
+        extra.setAttribute("aria-label", _("{label}的類別", { label: o.label }));
         extra.onchange = () => { if (extra.value) ob.checked = true; set(); };
       }
       if (extra) lab.append(extra);
@@ -2943,11 +2977,11 @@ function renderFormBody() {
     fields.append(mk("h4", { textContent: g.title }));
     for (const it of g.items) fields.append(item(it));
   }
-  fields.append(mk("h4", { textContent: "會議決議" }));
+  fields.append(mk("h4", { textContent: _("會議決議") }));
   for (const g of s.decisions) {
     if (s.decisions.length === 1) { for (const it of g.items) fields.append(item(it)); continue; }
     const small = mk("small");
-    const count = () => { const n = g.items.filter(formFilled).length; small.textContent = n ? `已勾 ${n} 項` : ""; };
+    const count = () => { const n = g.items.filter(formFilled).length; small.textContent = n ? _("已勾 {n} 項", { n }) : ""; };
     const det = mk("details", {}, mk("summary", {}, g.title, small));
     det.open = g.items.some(formFilled);
     for (const it of g.items) det.append(item(it, count));
@@ -2986,15 +3020,15 @@ async function genForm() {
       extraUsage = addUsage(extraUsage, j.usage); renderUsage(); saveAiSoon();
     } else formError = j.error || `HTTP ${r.status}`;
   } catch (e) {
-    if (mid === meetingId) formError = "連不到伺服器";
+    if (mid === meetingId) formError = _("連不到伺服器");
   } finally {
     if (mid === meetingId) { formBusy = false; renderForm(); }
   }
 }
 
 function formFileName() {
-  const name = (form.values.header?.name || meetingTitle || "會議").trim();
-  const base = formSchemas[form.template]?.file_name || "會議紀錄";
+  const name = (form.values.header?.name || meetingTitle || "會議").trim();   // 不翻：Word 檔名
+  const base = formSchemas[form.template]?.file_name || "會議紀錄";   // 不翻：Word 檔名
   return `${base}-${name}-${form.date || localDate(new Date())}.docx`.replace(/[\\/:*?"<>|]/g, "_");
 }
 
@@ -3011,7 +3045,7 @@ async function downloadForm() {
     downloadBlob(await r.blob(), formFileName());
     formError = "";
   } catch (e) {
-    formError = e instanceof TypeError ? "連不到伺服器" : e.message;
+    formError = e instanceof TypeError ? _("連不到伺服器") : e.message;
   } finally {
     renderFormNote();
   }
@@ -3063,7 +3097,7 @@ fetch(api("/api/agendas")).then((r) => r.json()).then((j) => {
 }).catch(() => {});
 fetch(api("/api/students")).then((r) => r.json()).then((j) => {
   const sel = $("agStudent");
-  sel.append(Object.assign(document.createElement("option"), { value: "", textContent: j.ready ? "選學生（選填）" : "這台沒有學生資料" }));
+  sel.append(Object.assign(document.createElement("option"), { value: "", textContent: j.ready ? _("選學生（選填）") : _("這台沒有學生資料") }));
   for (const s of j.students || []) {
     const code = typeof s === "string" ? s : s.code;
     studentLabels[code] = typeof s === "string" ? code : s.label || code;
@@ -3076,7 +3110,7 @@ fetch(api("/api/students")).then((r) => r.json()).then((j) => {
 fetch(api("/api/forms")).then((r) => r.json()).then((j) => {
   const errs = j.errors || [];
   $("packErr").hidden = !errs.length;
-  $("packErr").textContent = errs.length ? "擴充包有問題，以下略過：" + errs.join("；") : "";
+  $("packErr").textContent = errs.length ? _("擴充包有問題，以下略過：") + errs.join(_("；")) : "";
 }).catch(() => {});
 
 function renderAgendaSetup() {
@@ -3085,40 +3119,40 @@ function renderAgendaSetup() {
   $("agGrade").hidden = !t;
   $("agGo").hidden = !t;
   $("agGo").disabled = agendaBusy;
-  $("agGo").textContent = agendaBusy ? "整理中…" : agendaAsk > Date.now() ? "再按一次：蓋掉你的修改"
-    : agenda?.type === type && agenda.items.length ? "重新產生" : "產生議程";
+  $("agGo").textContent = agendaBusy ? _("整理中…") : agendaAsk > Date.now() ? _("再按一次：蓋掉你的修改")
+    : agenda?.type === type && agenda.items.length ? _("重新產生") : _("產生議程");
   $("agAdd").hidden = !type || agendaBusy;
   const note = $("agNote");
   note.className = "help" + (agendaError ? " err" : "");
-  if (agendaBusy) note.textContent = $("agStudent").value ? "AI 正在讀學生資料、整理議程…（約半分鐘）" : "整理議程…";
-  else if (agendaError) note.textContent = `議程失敗：${agendaError}`;
-  else if (!type) note.textContent = "開會時在側欄「議程」逐項勾選，比較不會漏談。";
-  else if (type === "manual") note.textContent = "按「＋ 新增項目」逐項打議程；★ 是必談項目。";
-  else if (!agenda?.items.length) note.textContent = t?.student ? "選學生後按「產生議程」：依年級、障別與學生資料列出要談的項目，AI 把每一項寫成針對這位學生的提問。" : "按「產生議程」列出這種會議要談的項目。";
-  else note.textContent = `${agenda.title}${agenda.student ? `｜${studentLabels[agenda.student] || agenda.student}` : ""}${agenda.facts?.grade ? `｜${agenda.facts.grade} 年級${agenda.gradeFrom === "ai" ? "（從學生資料）" : ""}` : ""}：共 ${agenda.items.length} 項，可以改字、增刪；★ 是必談。`;
+  if (agendaBusy) note.textContent = $("agStudent").value ? _("AI 正在讀學生資料、整理議程…（約半分鐘）") : _("整理議程…");
+  else if (agendaError) note.textContent = _("議程失敗：{agendaError}", { agendaError });
+  else if (!type) note.textContent = _("開會時在側欄「議程」逐項勾選，比較不會漏談。");
+  else if (type === "manual") note.textContent = _("按「＋ 新增項目」逐項打議程；★ 是必談項目。");
+  else if (!agenda?.items.length) note.textContent = t?.student ? _("選學生後按「產生議程」：依年級、障別與學生資料列出要談的項目，AI 把每一項寫成針對這位學生的提問。") : _("按「產生議程」列出這種會議要談的項目。");
+  else note.textContent = _("{title}{v}{v2}：共 {n} 項，可以改字、增刪；★ 是必談。", { title: agenda.title, v: agenda.student ? _("｜{v}", { v: studentLabels[agenda.student] || agenda.student }) : "", v2: agenda.facts?.grade ? _("｜{grade} 年級{v}", { grade: agenda.facts.grade, v: agenda.gradeFrom === "ai" ? _("（從學生資料）") : "" }) : "", n: agenda.items.length });
   // 上限提示：自己打的議程最容易到上限，每一種都要說
-  if (!agendaBusy && agenda?.type === type && agenda.items.length >= AGENDA_MAX) note.textContent += `已經 ${AGENDA_MAX} 項，最多就這麼多。`;
+  if (!agendaBusy && agenda?.type === type && agenda.items.length >= AGENDA_MAX) note.textContent += _("已經 {AGENDA_MAX} 項，最多就這麼多。", { AGENDA_MAX });
   const ol = $("agList");
   ol.replaceChildren();
   if (!agenda || agenda.type !== type) return;
   agenda.items.forEach((it, i) => {
     const li = document.createElement("li");
     // 實心 ★＝必談、空心 ☆＝不一定要談（形狀也跟著變，不只靠顏色）
-    const star = Object.assign(document.createElement("button"), { type: "button", textContent: it.required ? "★" : "☆", title: "必談" });
+    const star = Object.assign(document.createElement("button"), { type: "button", textContent: it.required ? "★" : "☆", title: _("必談") });
     star.setAttribute("aria-pressed", String(!!it.required));
-    star.setAttribute("aria-label", `「${it.title || "未命名"}」必談`);
+    star.setAttribute("aria-label", _("「{v}」必談", { v: it.title || _("未命名") }));
     star.onclick = () => { it.required = !it.required; star.textContent = it.required ? "★" : "☆"; star.setAttribute("aria-pressed", String(it.required)); agendaChanged(); };
-    const title = Object.assign(document.createElement("input"), { type: "text", value: it.title, maxLength: 60, placeholder: "議題" });
-    title.setAttribute("aria-label", `第 ${i + 1} 項議題`);
+    const title = Object.assign(document.createElement("input"), { type: "text", value: it.title, maxLength: 60, placeholder: _("議題") });
+    title.setAttribute("aria-label", _("第 {v} 項議題", { v: i + 1 }));
     title.oninput = () => { it.title = title.value; agendaChanged(); };
-    const del = Object.assign(document.createElement("button"), { type: "button", textContent: "✕", title: "刪除這一項" });
-    del.setAttribute("aria-label", `刪除「${it.title || "未命名"}」`);
+    const del = Object.assign(document.createElement("button"), { type: "button", textContent: "✕", title: _("刪除這一項") });
+    del.setAttribute("aria-label", _("刪除「{v}」", { v: it.title || _("未命名") }));
     del.onclick = () => { agenda.items.splice(i, 1); agendaChanged(); renderAgendaSetup(); (ol.querySelectorAll("li input")[Math.min(i, agenda.items.length - 1) * 2] || $("agAdd")).focus(); };
-    const detail = Object.assign(document.createElement("input"), { type: "text", value: it.detail, maxLength: 300, placeholder: "要問什麼、提醒什麼（選填）", className: "ag-detail" });
-    detail.setAttribute("aria-label", `第 ${i + 1} 項的說明`);
+    const detail = Object.assign(document.createElement("input"), { type: "text", value: it.detail, maxLength: 300, placeholder: _("要問什麼、提醒什麼（選填）"), className: "ag-detail" });
+    detail.setAttribute("aria-label", _("第 {v} 項的說明", { v: i + 1 }));
     detail.oninput = () => { it.detail = detail.value; agendaChanged(); };
     li.append(star, title, del, detail);
-    const meta = it.source === "ai" ? "AI 依學生資料加的" : it.uncertain ? "依年級或資料判斷不了，請確認要不要談" : "";
+    const meta = it.source === "ai" ? _("AI 依學生資料加的") : it.uncertain ? _("依年級或資料判斷不了，請確認要不要談") : "";
     if (meta) li.append(Object.assign(document.createElement("span"), { className: "ag-meta", textContent: meta }));
     ol.append(li);
   });
@@ -3151,7 +3185,7 @@ async function buildAgenda() {
       items: j.items.map((it) => ({ ...it, done: false, by: "" })), edited: false };
     agendaChanged(false);
   } catch (e) {
-    agendaError = e instanceof TypeError ? "連不到伺服器" : e.message;
+    agendaError = e instanceof TypeError ? _("連不到伺服器") : e.message;
   } finally {
     agendaBusy = false;
     $("agType").disabled = $("agStudent").disabled = false;
@@ -3163,7 +3197,7 @@ $("agType").onchange = () => {
   const type = $("agType").value;
   // 換類型：前一種的議程不留（不然開會時用的會和畫面上的不一樣）；自己打的直接開一份空的，擴充包的要按「產生議程」
   if (agenda && agenda.type !== type) agenda = null;
-  if (type === "manual" && !agenda) agenda = { type, title: "自己打的議程", form: null, student: null, facts: {}, items: [] };
+  if (type === "manual" && !agenda) agenda = { type, title: _("自己打的議程"), form: null, student: null, facts: {}, items: [] };
   agendaError = ""; agendaAsk = 0;
   agendaChanged(false);
   renderAgendaSetup();
@@ -3172,7 +3206,7 @@ $("agStudent").onchange = renderAgendaSetup;
 $("agGo").onclick = buildAgenda;
 $("agAdd").onclick = () => {
   const type = $("agType").value;
-  if (!agenda || agenda.type !== type) agenda = { type, title: type === "manual" ? "自己打的議程" : agendaTypes[type]?.title || "議程", form: agendaTypes[type]?.form || null, student: null, facts: {}, items: [] };
+  if (!agenda || agenda.type !== type) agenda = { type, title: type === "manual" ? _("自己打的議程") : agendaTypes[type]?.title || _("議程"), form: agendaTypes[type]?.form || null, student: null, facts: {}, items: [] };
   if (agenda.items.length >= AGENDA_MAX) { renderAgendaSetup(); return; }
   agenda.items.push(agendaNewItem());
   agendaChanged();
@@ -3216,8 +3250,8 @@ function renderAgendaCheck() {
   }
   const items = agenda.items.filter((it) => it.title.trim());
   const done = items.filter((it) => it.done).length, left = items.filter((it) => it.required && !it.done).length;
-  $("agProgress").textContent = `已談 ${done}／${items.length} 項` + (left ? `，必談還差 ${left} 項` : "，必談都談過了");
-  $("agAiNote").textContent = aiOn ? "AI 每整理兩段會檢查哪些項目談過、自動打勾；勾錯可以取消。" : "這場沒有開 AI 整理，請自己勾。";
+  $("agProgress").textContent = _("已談 {done}／{n} 項", { done, n: items.length }) + (left ? _("，必談還差 {left} 項", { left }) : _("，必談都談過了"));
+  $("agAiNote").textContent = aiOn ? _("AI 每整理兩段會檢查哪些項目談過、自動打勾；勾錯可以取消。") : _("這場沒有開 AI 整理，請自己勾。");
   $("agSoon").hidden = phase !== "rec";
   const ol = $("agCheck");
   ol.replaceChildren(...items.map((it) => {
@@ -3233,14 +3267,14 @@ function renderAgendaCheck() {
     const text = document.createElement("span");
     const t = Object.assign(document.createElement("span"), { className: "t", textContent: it.title });
     text.append(t);
-    if (it.required) text.append(Object.assign(document.createElement("span"), { className: "req", textContent: "必談" }));
+    if (it.required) text.append(Object.assign(document.createElement("span"), { className: "req", textContent: _("必談") }));
     if (it.detail) text.append(Object.assign(document.createElement("span"), { className: "d", textContent: it.detail }));
     if (it.by === "ai" && it.done) {
       const at = chunks.get(it.para)?.start;
       text.append(Object.assign(document.createElement("span"), { className: "ai",
-        textContent: `AI：${it.note || "談過了"}${at != null ? `（${fmtTime(at)}）` : ""}` }));
+        textContent: _("AI：{v}{v2}", { v: it.note || _("談過了"), v2: at != null ? _("（{v}）", { v: fmtTime(at) }) : "" }) }));
     } else if (it.by === "manual-off") {
-      text.append(Object.assign(document.createElement("span"), { className: "ai off", textContent: "AI 判斷談過，你取消了；AI 不會再勾" }));
+      text.append(Object.assign(document.createElement("span"), { className: "ai off", textContent: _("AI 判斷談過，你取消了；AI 不會再勾") }));
     }
     const label = document.createElement("label");
     label.append(box, text);
@@ -3253,14 +3287,14 @@ function renderAgendaCheck() {
 function showAgendaRemind(stopping) {
   agendaRemindStop = stopping;
   const list = agendaPending(stopping);
-  $("agRemindHead").textContent = list.length ? (stopping ? `還有 ${list.length} 項必談沒談` : `還有 ${list.length} 項沒談`) : "議程都談過了";
+  $("agRemindHead").textContent = list.length ? (stopping ? _("還有 {n} 項必談沒談", { n: list.length }) : _("還有 {n} 項沒談", { n: list.length })) : _("議程都談過了");
   $("agRemindList").replaceChildren(...list.map((it) => {
     const li = Object.assign(document.createElement("li"), { textContent: it.title });
-    if (it.required && !stopping) li.append(Object.assign(document.createElement("span"), { className: "req", textContent: "必談" }));
+    if (it.required && !stopping) li.append(Object.assign(document.createElement("span"), { className: "req", textContent: _("必談") }));
     return li;
   }));
   $("agRemindEnd").hidden = !stopping;
-  $("agRemindBack").textContent = list.length ? "回去談" : "好";
+  $("agRemindBack").textContent = list.length ? _("回去談") : _("好");
   $("agRemind").hidden = false;
   $("agRemindBack").focus();
 }
@@ -3285,7 +3319,7 @@ if (agenda) $("agType").value = agenda.type === "manual" ? "manual" : "";
 // 畫圖、縮放、收合、大畫面、編輯、複製 Mermaid、下載圖片、匯出 .opml 都在共用元件 web/shared/mindmap.js（#155，字幕工作室也用同一份）；
 // 這裡只管產生、跟著暫存與更正名字。mindmap 是這場的資料（編輯後由元件的 onChange 換成新的一份），mapShown 是元件目前顯示的那一份
 let mindmap = null, mapBusy = false, mapError = "", mapRegenAsk = 0, mapShown = null;
-const mapFileBase = () => `mindmap-${meetingTitle || "會議"}`;
+const mapFileBase = () => `mindmap-${meetingTitle || "會議"}`;   // 不翻：檔名
 const mapUI = MindMap.mount($("mapView"), {
   theme: pageTheme(),
   onChange(m) { mindmap = mapShown = m; saveAiSoon(); renderMapCtl(); },
@@ -3318,13 +3352,13 @@ function renderMindmap() {
 function renderMapCtl() {
   const note = $("mapNote");
   note.className = "hint" + (mapError ? " err" : "");
-  if (mapBusy) note.textContent = "AI 正在畫心智圖…（約半分鐘）";
-  else if (mapError) note.textContent = `心智圖失敗：${mapError}。可以再按一次。`;
-  else if (mindmap) note.textContent = "按「編輯」可以直接改字、增刪項目；「匯出到心智圖 App」下載 .opml，XMind、MindNode 等 App 打開後可以繼續改。存到 Drive 時圖檔、Markdown、.opml 會一起存。";
-  else note.textContent = "把整場整理成一張圖：主題在中間，議題往兩邊展開。";
+  if (mapBusy) note.textContent = _("AI 正在畫心智圖…（約半分鐘）");
+  else if (mapError) note.textContent = _("心智圖失敗：{mapError}。可以再按一次。", { mapError });
+  else if (mindmap) note.textContent = _("按「編輯」可以直接改字、增刪項目；「匯出到心智圖 App」下載 .opml，XMind、MindNode 等 App 打開後可以繼續改。存到 Drive 時圖檔、Markdown、.opml 會一起存。");
+  else note.textContent = _("把整場整理成一張圖：主題在中間，議題往兩邊展開。");
   const asking = Date.now() - mapRegenAsk < 5000;
   $("mapGo").disabled = mapBusy;
-  $("mapGo").textContent = asking ? "再按一次：蓋掉你的修改" : mindmap ? "重新產生" : "產生心智圖";
+  $("mapGo").textContent = asking ? _("再按一次：蓋掉你的修改") : mindmap ? _("重新產生") : _("產生心智圖");
 }
 
 function downloadBlob(blob, name) {
@@ -3352,7 +3386,7 @@ async function genMindmap() {
     if (r.ok) { showMindmap(mapStrings({ center: j.center, branches: j.branches }, fixNames), { undo: true }); extraUsage = addUsage(extraUsage, j.usage); renderUsage(); saveAiSoon(); }
     else mapError = j.error || `HTTP ${r.status}`;
   } catch (e) {
-    if (mid === meetingId) mapError = "連不到伺服器";
+    if (mid === meetingId) mapError = _("連不到伺服器");
   } finally {
     if (mid === meetingId) { mapBusy = false; renderMindmap(); }
   }
@@ -3424,13 +3458,13 @@ async function genModule(spec, options) {
     if (r.ok && typeof j.markdown === "string") {
       const m = cleanModules([{ module: j.module, title: fixNames(j.title || spec.title), options: j.options, markdown: fixNames(j.markdown) }])[0];
       const i = m ? modules.findIndex((x) => x.key === m.key) : -1;
-      if (!m) modError = "AI 沒有給內容";
+      if (!m) modError = _("AI 沒有給內容");
       else if (i >= 0) modules[i] = m;
       else modules.push(m);
       extraUsage = addUsage(extraUsage, j.usage); renderUsage(); saveAiSoon();
     } else modError = j.error || `HTTP ${r.status}`;
   } catch (e) {
-    if (mid === meetingId) modError = "連不到伺服器";
+    if (mid === meetingId) modError = _("連不到伺服器");
   } finally {
     if (mid === meetingId) { modBusy = null; renderModules(); }
   }
@@ -3445,8 +3479,8 @@ fetch(api("/api/modules")).then((r) => r.json()).then((j) => {
 
 // ---- 匯入錄好的檔案（#90）：上傳到 主機，用選好的引擎轉錄；轉出來的字跟現場錄音走同一條路 ----
 const SONIOX_ASYNC_USD_PER_HOUR = 0.10;   // stt-async-v5，soniox.com/pricing（2026-10-22）
-const IMPORT_STAGES = { upload: "上傳檔案", convert: "轉成音檔", upload_stt: "送到 Soniox", queued: "Soniox 排隊中", transcribing: "Soniox 轉錄中", asr: "本機辨識中",
-  client_asr: "準備轉錄", fetch_audio: "從主機取回轉好的音檔", send_result: "把逐字稿送回主機" };
+const IMPORT_STAGES = { upload: _("上傳檔案"), convert: _("轉成音檔"), upload_stt: _("送到 Soniox"), queued: _("Soniox 排隊中"), transcribing: _("Soniox 轉錄中"), asr: _("本機辨識中"),
+  client_asr: _("準備轉錄"), fetch_audio: _("從主機取回轉好的音檔"), send_result: _("把逐字稿送回主機") };
 const IMPORT_NO_PCT = new Set(["queued", "transcribing", "client_asr", "fetch_audio", "send_result"]);
 const IMPORT_EXT = /\.(m4a|mp3|wav|aac|flac|ogg|oga|opus|webm|mp4|mov|m4v|caf|aif|aiff|amr|3gp|wma|mkv)$/i;
 
@@ -3456,11 +3490,11 @@ function importProgress() {
   const pct = im.stage === "upload" ? (im.size ? im.sent / im.size : 0)
     : im.stage === "upload_stt" ? (im.sttSize ? im.sttSent / im.sttSize : null)
     : im.total && !IMPORT_NO_PCT.has(im.stage) ? Math.min(1, im.done / im.total) : null;
-  const waited = im.elapsed ? `，已等 ${Math.floor(im.elapsed / 60)} 分 ${im.elapsed % 60} 秒` : "";
-  const label = IMPORT_STAGES[im.stage] || "處理中";
+  const waited = im.elapsed ? _("，已等 {v} 分 {v2} 秒", { v: Math.floor(im.elapsed / 60), v2: im.elapsed % 60 }) : "";
+  const label = IMPORT_STAGES[im.stage] || _("處理中");
   // client 模式是這個瀏覽器在送 Soniox：手機鎖螢幕或切走太久，主機會當成頁面關了
-  const keep = im.client ? "轉錄由這個瀏覽器處理，請讓這頁保持開著（手機不要鎖螢幕或切到別的 App）。" : "可以先切到別的分頁，這頁保持開著就好。";
-  return { pct, text: `匯入「${im.name}」：${label}${pct != null ? ` ${Math.floor(pct * 100)}%` : ""}${waited}。${keep}` };
+  const keep = im.client ? _("轉錄由這個瀏覽器處理，請讓這頁保持開著（手機不要鎖螢幕或切到別的 App）。") : _("可以先切到別的分頁，這頁保持開著就好。");
+  return { pct, text: _("匯入「{name}」：{label}{v}{waited}。{keep}", { name: im.name, label, v: pct != null ? ` ${Math.floor(pct * 100)}%` : "", waited, keep }) };
 }
 
 // 90 秒沒有任何進度：問伺服器這個匯入還在不在（主機 重新啟動過就不在了），不在就把已轉好的部分收尾
@@ -3471,7 +3505,7 @@ async function checkImportAlive() {
   try {
     const j = await (await fetch(api(`/api/import/status?meeting=${mid}`))).json();
     if (importing === im && mid === meetingId && !j.running) {
-      setStatus(`匯入中斷了（${hostName}可能重新啟動過），已轉好的部分留著`, true);
+      setStatus(_("匯入中斷了（{host}可能重新啟動過），已轉好的部分留著", { host: hostName }), true);
       if (localEvt) { localEvt.close(); localEvt = null; }
       cleanup();
     } else im.lastEvt = Date.now();
@@ -3492,20 +3526,20 @@ async function startImport(file) {
     if (!ok) { setStatus(hostErr, true); return; }
   }
   if (TRANSCRIPT_EXT.test(file.name) || (!IMPORT_EXT.test(file.name) && /^text\//.test(file.type))) return importTranscript(file);
-  if (!IMPORT_EXT.test(file.name) && !/^(audio|video)\//.test(file.type)) { setStatus(`「${file.name}」不是錄音、影片或逐字稿檔`, true); return; }
+  if (!IMPORT_EXT.test(file.name) && !/^(audio|video)\//.test(file.type)) { setStatus(_("「{name}」不是錄音、影片或逐字稿檔", { name: file.name }), true); return; }
   endMicTest();
   stopRequested = false; durationMs = 0; continuing = false; savedOk = false;
   hideAlert();
-  importTitle(file, "匯入的錄音");
+  importTitle(file, _("匯入的錄音"));
   engineNow = $("engine").value;
-  if (engineNow === "azure") { setStatus("匯入檔案還不能用 Azure，請改選其他辨識引擎", true); return; }
+  if (engineNow === "azure") { setStatus(_("匯入檔案還不能用 Azure，請改選其他辨識引擎"), true); return; }
   if (engineNow === "soniox" && keyMode === "client") {
     // 金鑰在這台裝置（#114）：轉錄由瀏覽器送 Soniox，先確認保管箱解鎖、有 Soniox 金鑰
     try { needCred("soniox"); } catch (e) { setStatus(e.message, true); if (e.vault) $("vaultBox").scrollIntoView({ block: "center" }); return; }
   }
   draftId = null;
   $("btn").disabled = true;
-  setStatus("準備匯入…");
+  setStatus(_("準備匯入…"));
   await beginMeeting();
   meetingImported = true;
   const mid = meetingId;
@@ -3517,7 +3551,7 @@ async function startImport(file) {
     postJson("/api/drafts/delete", { draft: draftId }).catch(() => {});
     draftId = null;
     $("btn").disabled = false;
-    setStatus(tooBig ? `檔案太大（上限 ${Math.round(j.max_bytes / 1073741824)} GB）` : "沒辦法匯入：" + (j.error || r.status), true);
+    setStatus(tooBig ? _("檔案太大（上限 {v} GB）", { v: Math.round(j.max_bytes / 1073741824) }) : _("沒辦法匯入：") + (j.error || r.status), true);
     return;
   }
   importing = { name: file.name, size: file.size, sent: 0, stage: "upload", done: 0, total: 0, elapsed: 0, lastEvt: Date.now() };
@@ -3536,7 +3570,7 @@ async function startImport(file) {
   xhr.setRequestHeader("X-Meeting-Scribe", "1");
   xhr.upload.onprogress = (e) => { if (mine()) { importing.sent = e.loaded; importing.lastEvt = Date.now(); } };
   // 伺服器那邊失敗會自己送錯誤與結束事件；這裡只管連不上的情況
-  xhr.onerror = () => { if (mine()) { setStatus(`上傳失敗：連不到${hostName}`, true); postJson("/api/import/cancel", { meeting: mid }).catch(() => {}); } };
+  xhr.onerror = () => { if (mine()) { setStatus(_("上傳失敗：連不到{host}", { host: hostName }), true); postJson("/api/import/cancel", { meeting: mid }).catch(() => {}); } };
   xhr.send(file);
 }
 
@@ -3552,21 +3586,21 @@ function importTitle(file, fallback) {
 // 字數上限約 10 小時的會議（每小時約 1.5 萬字）：再多的話 AI 要整理上千段，額度吃不消
 const TRANSCRIPT_EXT = /\.(txt|md|markdown|srt|vtt)$/i, TRANSCRIPT_MAX = 2 * 1024 * 1024, TRANSCRIPT_CHARS = 150000;
 async function importTranscript(file) {
-  if (!$("ai").checked) { setStatus("匯入逐字稿是要讓 AI 重新整理：請先勾下面的「AI 整理」", true); return; }
-  if (file.size > TRANSCRIPT_MAX) { setStatus("逐字稿檔案太大（上限 2 MB）", true); return; }
+  if (!$("ai").checked) { setStatus(_("匯入逐字稿是要讓 AI 重新整理：請先勾下面的「AI 整理」"), true); return; }
+  if (file.size > TRANSCRIPT_MAX) { setStatus(_("逐字稿檔案太大（上限 2 MB）"), true); return; }
   // 讀檔要等一下：先擋住按鈕與拖檔，讀完再確認還在開始前的畫面（#176）
   $("btn").disabled = true;
   let lines = [];
   try { lines = RecapFiles.parseTranscript(await file.text()); } catch (e) { /* 讀不了當成空的 */ }
   $("btn").disabled = false;
   if (recording || importing || phase !== "setup") return;
-  if (!lines.length) { setStatus(`「${file.name}」裡沒有讀到逐字稿`, true); return; }
+  if (!lines.length) { setStatus(_("「{name}」裡沒有讀到逐字稿", { name: file.name }), true); return; }
   const chars = lines.reduce((n, x) => n + x.text.length, 0);
-  if (chars > TRANSCRIPT_CHARS) { setStatus(`逐字稿太長（${chars.toLocaleString()} 字，上限 ${TRANSCRIPT_CHARS.toLocaleString()} 字，約 10 小時的會議）`, true); return; }
+  if (chars > TRANSCRIPT_CHARS) { setStatus(_("逐字稿太長（{v} 字，上限 {v2} 字，約 10 小時的會議）", { v: chars.toLocaleString(), v2: TRANSCRIPT_CHARS.toLocaleString() }), true); return; }
   endMicTest();
   stopRequested = false; durationMs = 0; continuing = false; savedOk = false;
   hideAlert();
-  importTitle(file, "匯入的逐字稿");
+  importTitle(file, _("匯入的逐字稿"));
   engineNow = "transcript";
   draftId = null;
   $("btn").disabled = true;
@@ -3580,7 +3614,7 @@ async function importTranscript(file) {
     totalMs = lines.reduce((m, x) => Math.max(m, x.start ?? 0), 0);
   } catch (e) {
     $("btn").disabled = false;
-    setStatus("匯入逐字稿失敗：" + e.message, true);
+    setStatus(_("匯入逐字稿失敗：") + e.message, true);
     return;
   }
   $("btn").disabled = false;
@@ -3590,24 +3624,24 @@ async function importTranscript(file) {
   syncDraft(true);
   putDraftMeta("done");
   updateSavePanel();
-  setStatus(`已匯入逐字稿 ${segs.length} 句，AI 整理中`);
+  setStatus(_("已匯入逐字稿 {n} 句，AI 整理中", { n: segs.length }));
 }
 
 // ---- client 模式的匯入（#114）：主機轉好 m4a 後，瀏覽器用保管箱的 Soniox 金鑰直接做非即時轉錄 ----
 // Soniox 的臨時金鑰只能用在即時 WebSocket（usage_type 只有 transcribe_websocket），檔案轉錄只能用主金鑰：
 // 主金鑰只送到寫死的 ASR_URLS.sonioxApi，不送主機；拿到的 tokens 原樣送回主機，之後跟主機自己轉的一樣（切批、AI 整理、暫存）
 const SONIOX_FILE_MODEL = "stt-async-v5", SONIOX_POLL_MS = 3000, SONIOX_WAIT_MS = 60 * 60 * 1000, CLIENT_PING_MS = 20000;
-const abortError = () => new DOMException("已取消", "AbortError");
+const abortError = () => new DOMException(_("已取消"), "AbortError");
 const waitMs = (ms, signal) => new Promise((resolve, reject) => {
   const t = setTimeout(resolve, ms);
   signal.addEventListener("abort", () => { clearTimeout(t); reject(abortError()); }, { once: true });
 });
 function sonioxError(status, upload = false) {
-  if (status === 401 || status === 403) return "Soniox 金鑰無效（到「轉錄設定」檢查）";
-  if (status === 402) return "Soniox 帳戶餘額不足，請到 Soniox Console 儲值";
-  if (status === 413 || (upload && status === 400)) return "Soniox 不收這個檔案（太大或格式不對）";
-  if (status === 429) return "Soniox 目前太忙或超過用量上限，請稍後再試";
-  return `Soniox 回應 ${status}`;
+  if (status === 401 || status === 403) return _("Soniox 金鑰無效（到「轉錄設定」檢查）");
+  if (status === 402) return _("Soniox 帳戶餘額不足，請到 Soniox Console 儲值");
+  if (status === 413 || (upload && status === 400)) return _("Soniox 不收這個檔案（太大或格式不對）");
+  if (status === 429) return _("Soniox 目前太忙或超過用量上限，請稍後再試");
+  return _("Soniox 回應 {status}", { status });
 }
 async function sonioxCall(key, method, path, body, signal) {
   let r;
@@ -3616,7 +3650,7 @@ async function sonioxCall(key, method, path, body, signal) {
       headers: { Authorization: "Bearer " + key, ...(body ? { "Content-Type": "application/json" } : {}) } });
   } catch (e) {
     if (e.name === "AbortError") throw e;
-    throw Object.assign(new Error("連不到 Soniox"), { transient: true });
+    throw Object.assign(new Error(_("連不到 Soniox")), { transient: true });
   }
   if (!r.ok) throw Object.assign(new Error(sonioxError(r.status)), { transient: r.status >= 500 || r.status === 429 });
   return r.status === 204 ? {} : r.json().catch(() => ({}));
@@ -3634,9 +3668,9 @@ function sonioxUpload(key, blob, im, signal) {
     xhr.onload = () => {
       const ok = xhr.status >= 200 && xhr.status < 300;
       if (ok && typeof xhr.response?.id === "string") resolve(xhr.response.id);
-      else reject(new Error(ok ? "Soniox 沒有回傳檔案代碼" : sonioxError(xhr.status, true)));
+      else reject(new Error(ok ? _("Soniox 沒有回傳檔案代碼") : sonioxError(xhr.status, true)));
     };
-    xhr.onerror = () => reject(new Error("上傳到 Soniox 時連線中斷"));
+    xhr.onerror = () => reject(new Error(_("上傳到 Soniox 時連線中斷")));
     xhr.onabort = () => reject(abortError());
     signal.addEventListener("abort", () => xhr.abort(), { once: true });
     xhr.send(fd);
@@ -3655,22 +3689,22 @@ async function clientTranscribe(im, mid) {
     key = needCred("soniox").key;
     stage("fetch_audio");
     const r = await fetch(api(`/api/import/audio?meeting=${mid}`), { signal });
-    if (!r.ok) throw new Error("從主機取回音檔失敗：" + ((await r.json().catch(() => ({}))).error || r.status));
+    if (!r.ok) throw new Error(_("從主機取回音檔失敗：") + ((await r.json().catch(() => ({}))).error || r.status));
     const blob = await r.blob();
     stage("upload_stt");
     fileId = await sonioxUpload(key, blob, im, signal);
     stage("queued");
     tid = (await sonioxCall(key, "POST", "/transcriptions", { model: SONIOX_FILE_MODEL, file_id: fileId, language_hints: ["zh", "en"],
       enable_speaker_diarization: true, context: { terms: asrTerms() } }, signal)).id;
-    if (typeof tid !== "string") throw new Error("Soniox 沒有回傳轉錄代碼");
+    if (typeof tid !== "string") throw new Error(_("Soniox 沒有回傳轉錄代碼"));
     const t0 = Date.now();
     for (let misses = 0; ;) {
       let st = {};
       try { st = await sonioxCall(key, "GET", `/transcriptions/${encodeURIComponent(tid)}`, null, signal); misses = 0; }
       catch (e) { if (!e.transient || ++misses > 5) throw e; }   // 手機網路晃一下：連續失敗 5 次才放棄
       if (st.status === "completed") break;
-      if (st.status === "error" || st.status === "failed") throw new Error(`Soniox 轉錄失敗（${String(st.error_message || st.status).slice(0, 120)}）`);
-      if (Date.now() - t0 > SONIOX_WAIT_MS) throw new Error("Soniox 等太久沒有結果");
+      if (st.status === "error" || st.status === "failed") throw new Error(_("Soniox 轉錄失敗（{v}）", { v: String(st.error_message || st.status).slice(0, 120) }));
+      if (Date.now() - t0 > SONIOX_WAIT_MS) throw new Error(_("Soniox 等太久沒有結果"));
       if (st.status) stage(st.status === "queued" || st.status === "downloading" ? "queued" : "transcribing");
       im.elapsed = Math.floor((Date.now() - t0) / 1000);
       await waitMs(SONIOX_POLL_MS, signal);
@@ -3680,10 +3714,10 @@ async function clientTranscribe(im, mid) {
     stage("send_result");
     im.elapsed = 0;
     const s = await postJson("/api/import/transcript", { meeting: mid, tokens });
-    if (!s.ok) throw new Error("轉好了，但送回主機失敗：" + ((await s.json().catch(() => ({}))).error || s.status));
+    if (!s.ok) throw new Error(_("轉好了，但送回主機失敗：") + ((await s.json().catch(() => ({}))).error || s.status));
   } catch (e) {
     // 取消（按「取消匯入」或換了一場）不算失敗；其他錯誤講清楚，然後跟取消一樣收尾，已轉好的部分不會有
-    if (e.name !== "AbortError" && mine()) { setStatus("匯入失敗：" + e.message, true); stop(); }
+    if (e.name !== "AbortError" && mine()) { setStatus(_("匯入失敗：") + e.message, true); stop(); }
   } finally {
     clearInterval(ping);
     // Soniox 會留 30 天：成功、失敗或取消都刪掉（刪不掉不擋結果）
@@ -3724,24 +3758,24 @@ async function start(cont = false) {
   continuing = cont;
   if (!cont) {
     setMeetingContext($("ctxSetup").value);
-    meetingTitle = $("mtgTitle").value.trim() || `${localDate(new Date())} 會議`;
+    meetingTitle = $("mtgTitle").value.trim() || `${localDate(new Date())} 會議`;   // 不翻：會議名稱會變成 Drive 資料夾與檔名
     meetingPlace = $("mtgPlace").value.trim();
   }
   savedOk = false;
-  setStatus("連線中…");
+  setStatus(_("連線中…"));
   // AudioContext 要在點擊當下建立，iPhone 才會允許出聲／收音
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   audioCtx.resume().catch(() => {});   // 在點擊當下就喚醒，iPhone 才不會停在 suspended
   if (!$("sourceBox").hidden && $("source").value !== "mic") {
     const kind = $("source").value;
-    setStatus(kind === "sys" ? "選「整個螢幕」並打開分享系統音訊…" : kind === "tab" ? "選擇要分享的分頁…" : "選擇要分享的分頁或螢幕…");
+    setStatus(kind === "sys" ? _("選「整個螢幕」並打開分享系統音訊…") : kind === "tab" ? _("選擇要分享的分頁…") : _("選擇要分享的分頁或螢幕…"));
     try {
       displayStream = await getTabAudio(kind);
     } catch (e) {
       stopAudio();
       $("btn").disabled = false;
       // 自己丟的「沒分享到聲音」是一般 Error，其他是瀏覽器的 DOMException
-      setStatus(e.name === "NotAllowedError" ? "沒有選要分享的畫面，已取消" : e.name === "Error" ? e.message : "無法分享聲音：" + e.message, true);
+      setStatus(e.name === "NotAllowedError" ? _("沒有選要分享的畫面，已取消") : e.name === "Error" ? e.message : _("無法分享聲音：") + e.message, true);
       return;
     }
   }
@@ -3793,7 +3827,7 @@ function stop() {
         cleanup();
       }
     }, 5000);
-    if ($("status").className !== "err") setStatus("取消中…已經轉好的部分會留下");
+    if ($("status").className !== "err") setStatus(_("取消中…已經轉好的部分會留下"));
     return;
   }
   if (!CLOUD.has(engineNow)) {
@@ -3801,13 +3835,13 @@ function stop() {
     sendLocal(null, true);
     const mid = meetingId;
     localQueue.then(() => postJson("/api/local/end", { meeting: mid })).catch(() => {});
-    if ($("status").className !== "err") setStatus("收尾中…（本機辨識剩下的部分）");
+    if ($("status").className !== "err") setStatus(_("收尾中…（本機辨識剩下的部分）"));
     return;
   }
   // 請轉錄服務把剩下的暫定字定稿後收尾；換服務途中按停止就直接收尾
   if (asr) asr.finish();
   else if (asrPending) { asrPending = null; asrGen++; cleanup(); }
-  if ($("status").className !== "err") setStatus("收尾中…");
+  if ($("status").className !== "err") setStatus(_("收尾中…"));
 }
 
 function cleanup() {
@@ -3832,7 +3866,7 @@ function cleanup() {
   // 每場錄完預設勾「一併存音檔」，之後使用者取消就尊重他的選擇
   if (!imported) audioDone.then(() => { $("saveAudio").checked = audioChunks.length > 0 && store.get("ms.saveAudio", "1") === "1"; updateSavePanel(); });
   updateSavePanel();
-  if ($("status").className !== "err" && !$("status").textContent.startsWith("已結束")) setStatus("連線已關閉");
+  if ($("status").className !== "err" && $("status").textContent !== _("已結束，可以下載逐字稿")) setStatus(_("連線已關閉"));
 }
 
 $("btn").onclick = () => {
@@ -3851,8 +3885,8 @@ $("polish").checked = store.get("ms.polish", "1") === "1";
 $("polish").onchange = () => store.set("ms.polish", $("polish").checked ? "1" : "0");
 function updatePolishNote() {
   $("polishNote").textContent = $("ai").checked
-    ? "AI 整理成好讀的版本：修錯字、斷句、刪口頭禪，不改意思。存檔時原稿附在後面。"
-    : "要先打開「AI 整理」才會優化。";
+    ? _("AI 整理成好讀的版本：修錯字、斷句、刪口頭禪，不改意思。存檔時原稿附在後面。")
+    : _("要先打開「AI 整理」才會優化。");
 }
 updatePolishNote();
 
@@ -3867,7 +3901,7 @@ function parseCorr(text, label) {
     if (m.length !== 2 || !m[0].trim() || !m[1].trim()) bad.push(i + 1);
     else pairs.push([m[0].trim(), m[1].trim()]);
   });
-  if (bad.length) throw new Error(`${label}第 ${bad.join("、")} 行看不懂，請寫成「聽錯的字 → 正確的字」`);
+  if (bad.length) throw new Error(_("{label}第 {v} 行看不懂，請寫成「聽錯的字 → 正確的字」", { label, v: bad.join(_("、")) }));
   return pairs;
 }
 function setCorrNote(msg, err = false) { $("corrNote").textContent = msg; $("corrNote").className = "help" + (err ? " err" : ""); }
@@ -3888,26 +3922,26 @@ async function loadCorr() {
     $("corrHints").disabled = $("corrFixed").disabled = false;
     const own = corr.hints.length + corr.fixed.length, wait = pending ? pending.hints.length + pending.fixed.length : 0;
     const clash = conflicts ? [...conflicts.hints, ...conflicts.fixed] : [];
-    if (recovered) setCorrNote("原本的對照表格式壞掉了，已在主機另存一份備份（corrections.json.bad-日期），這裡先從空白開始。", true);
-    else if (vocab?.source === "shared") setCorrNote(`已讀共用用詞正本（一定換 ${vocab.fixed} 組、AI 參考 ${vocab.hints} 組）。這台另外加了 ${own} 組${wait ? `，其中 ${wait} 組還沒收回正本` : ""}。`
-      + (clash.length ? `有 ${clash.length} 組和正本寫法不同，以正本為準（${clash.slice(0, 3).map(([w, r, c]) => `${w}：這裡寫 ${r}、正本是 ${c}`).join("；")}${clash.length > 3 ? "…" : ""}）；要改請改正本，或從這裡刪掉。` : ""), clash.length > 0);
-    else setCorrNote(own ? `共 ${own} 組。` : "");
-  } catch (e) { setCorrNote("讀不到常錯字對照，暫時不能修改；打開設定時會再試一次。錄音照常，AI 會用伺服器上存的對照。", true); }
+    if (recovered) setCorrNote(_("原本的對照表格式壞掉了，已在主機另存一份備份（corrections.json.bad-日期），這裡先從空白開始。"), true);
+    else if (vocab?.source === "shared") setCorrNote(_("已讀共用用詞正本（一定換 {fixed} 組、AI 參考 {hints} 組）。這台另外加了 {own} 組{v}。", { fixed: vocab.fixed, hints: vocab.hints, own, v: wait ? _("，其中 {wait} 組還沒收回正本", { wait }) : "" })
+      + (clash.length ? _("有 {n} 組和正本寫法不同，以正本為準（{v}{v2}）；要改請改正本，或從這裡刪掉。", { n: clash.length, v: clash.slice(0, 3).map(([w, r, c]) => _("{w}：這裡寫 {r}、正本是 {c}", { w, r, c })).join(_("；")), v2: clash.length > 3 ? "…" : "" }) : ""), clash.length > 0);
+    else setCorrNote(own ? _("共 {own} 組。", { own }) : "");
+  } catch (e) { setCorrNote(_("讀不到常錯字對照，暫時不能修改；打開設定時會再試一次。錄音照常，AI 會用伺服器上存的對照。"), true); }
 }
 async function saveCorr() {
   if (!corrLoaded) return;
   let body;
-  try { body = { hints: parseCorr($("corrHints").value, "常錯字對照"), fixed: parseCorr($("corrFixed").value, "一定替換") }; }
+  try { body = { hints: parseCorr($("corrHints").value, _("常錯字對照")), fixed: parseCorr($("corrFixed").value, _("一定替換")) }; }
   catch (e) { setCorrNote(e.message, true); return; }
   if (JSON.stringify(body) === JSON.stringify(corr)) return;
-  setCorrNote("儲存中…");
+  setCorrNote(_("儲存中…"));
   try {
     const r = await postJson("/api/corrections", body);
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) { setCorrNote(j.error || `存不起來（HTTP ${r.status}）`, true); return; }
+    if (!r.ok) { setCorrNote(j.error || _("存不起來（HTTP {status}）", { status: r.status }), true); return; }
     corr = j;
-    setCorrNote(`已儲存 ${corr.hints.length + corr.fixed.length} 組，下一場會議開始生效。`);
-  } catch (e) { setCorrNote("連不到伺服器，還沒存。", true); }
+    setCorrNote(_("已儲存 {v} 組，下一場會議開始生效。", { v: corr.hints.length + corr.fixed.length }));
+  } catch (e) { setCorrNote(_("連不到伺服器，還沒存。"), true); }
 }
 $("corrHints").addEventListener("change", saveCorr);
 $("corrFixed").addEventListener("change", saveCorr);
@@ -4010,7 +4044,7 @@ setSide(sideDefault(), false);
 // ---- 浮動字幕：Document Picture-in-Picture 小視窗浮在所有視窗最上層（桌機 Chrome／Edge）----
 // 只鏡像底部字幕列與錄音燈，不碰錄音流程；內容留在同一個瀏覽器，不多任何資料去處
 let pipWin = null, pipOpening = false;
-const PIP_CSS = `
+const PIP_CSS = `/* 不翻：浮動字幕視窗的樣式 */
   * { box-sizing:border-box; }
   html, body { margin:0; height:100%; }
   body { background:#000; color:#fff; display:flex; flex-direction:column; font:clamp(14px, min(4.2vw, 34vh), 64px)/1.4 -apple-system, "PingFang TC", sans-serif; }
@@ -4034,7 +4068,7 @@ function syncPip() {
 const pipObserver = new MutationObserver(syncPip);
 
 function updatePipBtn() {
-  $("pipBtn").textContent = pipWin ? "關閉浮動字幕" : "浮動字幕";
+  $("pipBtn").textContent = pipWin ? _("關閉浮動字幕") : _("浮動字幕");
   $("pipBtn").setAttribute("aria-pressed", String(!!pipWin));
 }
 
@@ -4047,13 +4081,13 @@ async function togglePip() {
     pipWin = await documentPictureInPicture.requestWindow({ width: 560, height: 110 });
   } catch (e) {
     // 錄音中狀態列每秒會被計時蓋過，不標成錯誤以免把費用顯示卡住
-    setStatus("無法開啟浮動字幕：" + e.message, !recording);
+    setStatus(_("無法開啟浮動字幕：") + e.message, !recording);
     return;
   } finally {
     pipOpening = false;
   }
   const d = pipWin.document;
-  d.title = "即時字幕";
+  d.title = _("即時字幕");
   const style = d.createElement("style");
   style.textContent = PIP_CSS;
   const lamp = d.createElement("div"), cap = d.createElement("div");
@@ -4109,7 +4143,7 @@ const relayObserver = new MutationObserver(() => relayNow());
 function setRelay(on) {
   relayOn = on;
   store.set("ms.capRelay", on ? "1" : "0");
-  $("overlayBtn").textContent = on ? "關閉桌面字幕" : "桌面字幕";
+  $("overlayBtn").textContent = on ? _("關閉桌面字幕") : _("桌面字幕");
   $("overlayBtn").setAttribute("aria-pressed", String(on));
   relayObserver.disconnect();
   if (on) {
@@ -4162,7 +4196,7 @@ function setPhase(next) {
   if (next === "rec" && !$("prefs").hidden) setPrefs(false);
   if (next !== "rec") setQuiet(false);
   $("sideToggle").hidden = $("dockSide").hidden = next === "setup";
-  $("tlTitle").textContent = next === "rec" ? "逐字稿" : "定稿逐字稿";
+  $("tlTitle").textContent = next === "rec" ? _("逐字稿") : _("定稿逐字稿");
   // 議程（#97）：會議結束回到設定畫面就是下一場，清掉；開始錄音時有議程就先看議程
   if (next === "setup" && prev !== "setup") { agenda = null; $("agType").value = ""; agendaError = ""; agendaStoreDraft(); }
   if (next === "rec" && prev === "setup") store.set("ms.agendaDraft", "");
@@ -4173,13 +4207,13 @@ function setPhase(next) {
   if (next === "rec" && prev === "setup" && agenda?.items.length) selectTab("agenda");
   if (next === "setup") {
     $("mtgName").textContent = "Cyclone Scribe";
-    $("mtgSub").textContent = "準備開始";
+    $("mtgSub").textContent = _("準備開始");
     // 每場重新帶入今天日期，名稱接著打就好；地點沿用上一場（連續開會多半在同一間）
     $("mtgTitle").value = `${localDate(new Date())} `;
     $("mtgPlace").value = meetingPlace;
     $("saveAudio").checked = store.get("ms.saveAudio", "1") === "1";
     $("saveAudio").disabled = false;
-    if (!$("status").classList.contains("err")) setStatus("填好會議名稱，按下面的按鈕開始");
+    if (!$("status").classList.contains("err")) setStatus(_("填好會議名稱，按下面的按鈕開始"));
     setSide(false, false);
   } else {
     // 日期已在資料夾與檔案裡，畫面上方只顯示名稱，手機才放得下
@@ -4188,11 +4222,11 @@ function setPhase(next) {
     updateSub();
     if (wide.matches && store.get("ms.sideOpen", "1") === "1") setSide(true, false);
   }
-  if (!recording) $("lampText").textContent = next === "done" ? "已結束" : "待命";
+  if (!recording) $("lampText").textContent = next === "done" ? _("已結束") : _("待命");
   if (next === "done") {
     const mins = totalMs ? Math.max(1, Math.round(totalMs / 60000)) : 0;
-    $("afterMeta").textContent = [meetingPlace, mins ? `約 ${mins} 分鐘` : "", `${segs.length} 句`].filter(Boolean).join("・");
-    $("saveTitle").value = meetingTitle.replace(/^\d{4}-\d{2}-\d{2}\s*/, "") || "會議";
+    $("afterMeta").textContent = [meetingPlace, mins ? _("約 {mins} 分鐘", { mins }) : "", _("{n} 句", { n: segs.length })].filter(Boolean).join("・");
+    $("saveTitle").value = meetingTitle.replace(/^\d{4}-\d{2}-\d{2}\s*/, "") || "會議";   // 不翻：資料夾名稱
     window.scrollTo(0, 0);
   }
 }
@@ -4203,7 +4237,7 @@ function updateDock() {
   const btn = $("btn"), save = canSave();
   btn.classList.toggle("recording", phase === "rec");
   btn.classList.toggle("next", phase === "done");
-  $("btnLabel").textContent = phase === "rec" ? (importing ? "取消匯入" : "停止錄音") : phase === "done" ? (save ? "存到 Drive" : "開始下一場") : "開始錄音";
+  $("btnLabel").textContent = phase === "rec" ? (importing ? _("取消匯入") : _("停止錄音")) : phase === "done" ? (save ? _("存到 Drive") : _("開始下一場")) : _("開始錄音");
   btn.setAttribute("aria-label", $("btnLabel").textContent);
   $("dockNext").hidden = !save;
   $("discardBtn").hidden = !(phase === "done" && !savedOk && finals.length > 0);
@@ -4211,12 +4245,12 @@ function updateDock() {
 $("dockNext").onclick = () => setPhase("setup");
 
 // 捨棄這場（#133）：主機暫存（含錄音）先刪成功、還在整理的程序一起停，才清掉頁面；按一次變確認，4 秒內再按才刪
-function disarmDiscard() { const b = $("discardBtn"); clearTimeout(b._t); delete b.dataset.armed; b.textContent = "捨棄這場"; }
+function disarmDiscard() { const b = $("discardBtn"); clearTimeout(b._t); delete b.dataset.armed; b.textContent = _("捨棄這場"); }
 $("discardBtn").onclick = async () => {
   const b = $("discardBtn");
   if (!b.dataset.armed) {
     b.dataset.armed = "1";
-    b.textContent = "確定捨棄？逐字稿、AI 整理和錄音都會刪掉";
+    b.textContent = _("確定捨棄？逐字稿、AI 整理和錄音都會刪掉");
     b._t = setTimeout(disarmDiscard, 4000);
     return;
   }
@@ -4229,7 +4263,7 @@ $("discardBtn").onclick = async () => {
       if (!r.ok && r.status !== 404) throw new Error((await r.json().catch(() => ({}))).error || r.status);
     }
   } catch (e) {
-    setStatus("沒有捨棄成功，這場還留著：" + e.message, true);
+    setStatus(_("沒有捨棄成功，這場還留著：") + e.message, true);
     return;
   } finally {
     b.disabled = false;
@@ -4245,14 +4279,14 @@ $("discardBtn").onclick = async () => {
   draftId = null; draftAudio = {}; draftSent = 0; lastLive = null; totalMs = 0; tOffset = 0; part = 1;
   $("dl").disabled = true;
   setPhase("setup");
-  setStatus("這場已捨棄：逐字稿、AI 整理和錄音都刪掉了");
+  setStatus(_("這場已捨棄：逐字稿、AI 整理和錄音都刪掉了"));
 };
 
 function updateSub() {
   const bits = [meetingPlace];
-  if (phase === "rec" && importing) bits.push("匯入：" + importing.name);
-  else if (phase === "rec" && micLabel) bits.push("收音：" + micLabel);
-  $("mtgSub").textContent = bits.filter(Boolean).join("・") || (phase === "rec" ? "錄音中" : "會議結束");
+  if (phase === "rec" && importing) bits.push(_("匯入：") + importing.name);
+  else if (phase === "rec" && micLabel) bits.push(_("收音：") + micLabel);
+  $("mtgSub").textContent = bits.filter(Boolean).join("・") || (phase === "rec" ? _("錄音中") : _("會議結束"));
 }
 
 // 存檔與下載的逐字稿開頭帶會議名稱與地點
@@ -4275,7 +4309,7 @@ function polishedText() {
 // 有優化版時優化版在前、原始逐字稿附在後面，AI 刪多了也對得回來
 function transcriptBody() {
   const nice = polishedText();
-  return (nice ? `【優化逐字稿】\n\n${nice}\n\n【原始逐字稿】\n\n` : "") + transcriptText();
+  return (nice ? `【優化逐字稿】\n\n${nice}\n\n【原始逐字稿】\n\n` : "") + transcriptText();   // 不翻：逐字稿檔案內容
 }
 
 function transcriptFile() {
@@ -4324,14 +4358,14 @@ function nfRender() {
   nfPairs.forEach((p) => {
     const li = document.createElement("li");
     const box = Object.assign(document.createElement("input"), { type: "checkbox", checked: p.on, onchange: () => { p.on = box.checked; } });
-    box.setAttribute("aria-label", `把「${p.wrong}」換成「${p.right}」`);
+    box.setAttribute("aria-label", _("把「{wrong}」換成「{right}」", { wrong: p.wrong, right: p.right }));
     const pair = document.createElement("span");
     pair.className = "pair";
     const right = Object.assign(document.createElement("input"), { type: "text", value: p.right, maxLength: 20, oninput: () => { p.right = right.value; } });
-    right.setAttribute("aria-label", `「${p.wrong}」的正確寫法`);
+    right.setAttribute("aria-label", _("「{wrong}」的正確寫法", { wrong: p.wrong }));
     const n = content.split(p.wrong).length - 1;
     pair.append(Object.assign(document.createElement("s"), { textContent: p.wrong }), "→", right,
-      Object.assign(document.createElement("span"), { className: "cnt", textContent: `${n} 處` }));
+      Object.assign(document.createElement("span"), { className: "cnt", textContent: _("{n} 處", { n }) }));
     li.append(box, pair);
     const at = content.indexOf(p.wrong);
     if (at >= 0) {
@@ -4345,18 +4379,18 @@ function nfRender() {
     list.append(li);
   });
   $("nfFind").disabled = nfBusy;
-  $("nfFind").textContent = nfBusy ? "AI 找尋中…" : "請 AI 找出來";
+  $("nfFind").textContent = nfBusy ? _("AI 找尋中…") : _("請 AI 找出來");
   $("nfApply").hidden = $("nfRememberBox").hidden = !nfPairs.length;
 }
 async function nfFindPairs() {
   const request = $("nfReq").value.trim();
-  if (!request) { nfSetNote("先用一句話說明要修正什麼。", true); $("nfReq").focus(); return; }
+  if (!request) { nfSetNote(_("先用一句話說明要修正什麼。"), true); $("nfReq").focus(); return; }
   const text = nfContent();
-  if (!text.trim()) { nfSetNote("還沒有內容可以更正。", true); return; }
+  if (!text.trim()) { nfSetNote(_("還沒有內容可以更正。"), true); return; }
   const mid = meetingId;
   nfBusy = true; nfPairs = [];
   nfRender();
-  nfSetNote("AI 正在讀整場內容，通常要幾十秒…");
+  nfSetNote(_("AI 正在讀整場內容，通常要幾十秒…"));
   try {
     const r = await fetch(api("/api/agent/names"), {
       method: "POST",
@@ -4368,9 +4402,9 @@ async function nfFindPairs() {
     if (!r.ok) { nfSetNote(j.error || `HTTP ${r.status}`, true); return; }
     extraUsage = addUsage(extraUsage, j.usage); renderUsage(); saveAiSoon();
     nfPairs = cleanFixes(j.pairs).map(([wrong, right]) => ({ wrong, right, on: true }));
-    nfSetNote(nfPairs.length ? "要換的勾起來，正確寫法可以直接改，再按「套用勾選的」。" : "AI 沒找到要換的地方。可以寫得更具體，例如直接寫出聽錯的字。");
+    nfSetNote(nfPairs.length ? _("要換的勾起來，正確寫法可以直接改，再按「套用勾選的」。") : _("AI 沒找到要換的地方。可以寫得更具體，例如直接寫出聽錯的字。"));
   } catch (e) {
-    if (mid === meetingId) nfSetNote("連不到伺服器", true);
+    if (mid === meetingId) nfSetNote(_("連不到伺服器"), true);
   } finally {
     if (mid === meetingId) { nfBusy = false; nfRender(); }
   }
@@ -4398,7 +4432,7 @@ async function rememberNames(add) {
 const SPEAKER_LABEL = /^講者\s*[0-9０-９一二三四五六七八九十]/;
 async function nfApplyPairs() {
   const add = cleanFixes(nfPairs.filter((p) => p.on).map((p) => [p.wrong, p.right]));
-  if (!add.length) { nfSetNote("沒有勾選要換的項目，或正確寫法空白、包含了錯字。", true); return; }
+  if (!add.length) { nfSetNote(_("沒有勾選要換的項目，或正確寫法空白、包含了錯字。"), true); return; }
   mergeFixes(add);
   for (const c of chunks.values()) for (const k of ["text", "corrected", "readable", "summary"]) if (c[k]) c[k] = fixNames(c[k]);
   if (lastLive) lastLive = mapStrings(lastLive, fixNames);
@@ -4423,13 +4457,13 @@ async function nfApplyPairs() {
   pushNameFixes();
   nfPairs = [];
   nfRender();
-  const done = `已更正 ${add.map(([w, r]) => `${w}→${r}`).join("、")}。`;
+  const done = _("已更正 {v}。", { v: add.map(([w, r]) => `${w}→${r}`).join(_("、")) });
   // 講者對應（講者一 → 小美）只對這場有意義：不加進每場都生效的常錯字對照（#185）
   const keep = add.filter(([w]) => !SPEAKER_LABEL.test(w));
-  const only = keep.length < add.length && $("nfRemember").checked ? "講者對應只用在這場，沒有加進常錯字對照。" : "";
+  const only = keep.length < add.length && $("nfRemember").checked ? _("講者對應只用在這場，沒有加進常錯字對照。") : "";
   if (!$("nfRemember").checked || !keep.length) { nfSetNote(done + only); return; }
-  try { await rememberNames(keep); nfSetNote(done + "也加進常錯字對照了，下一場開始生效。" + only); }
-  catch (e) { nfSetNote(done + "但加進常錯字對照失敗：" + e.message, true); }
+  try { await rememberNames(keep); nfSetNote(done + _("也加進常錯字對照了，下一場開始生效。") + only); }
+  catch (e) { nfSetNote(done + _("但加進常錯字對照失敗：") + e.message, true); }
 }
 function nfShow(open) {
   if (!open && $("nameFix").hidden) return;   // 遮罩是兩個視窗共用的：沒開的那個不動
@@ -4445,7 +4479,7 @@ $("nfScrim").onclick = () => { nfShow(false); ctxShow(false); };
 function setMeetingContext(v) {
   meetingContext = String(v || "").replace(/\r\n/g, "\n").trim().slice(0, 1000);
   $("ctxOpen").classList.toggle("has", Boolean(meetingContext));
-  $("ctxOpen").title = meetingContext ? `會議說明：${meetingContext.slice(0, 60)}${meetingContext.length > 60 ? "…" : ""}` : "說明這場會議怎麼進行、誰是主持人，AI 依這段判斷誰在講話";
+  $("ctxOpen").title = meetingContext ? _("會議說明：{v}{v2}", { v: meetingContext.slice(0, 60), v2: meetingContext.length > 60 ? "…" : "" }) : _("說明這場會議怎麼進行、誰是主持人，AI 依這段判斷誰在講話");
 }
 let ctxOpener = null;
 function ctxShow(open) {
@@ -4457,8 +4491,8 @@ function ctxShow(open) {
 async function saveMeetingContext() {
   setMeetingContext($("ctxText").value);
   const ok = draftId ? await putDraftMeta(recording ? "recording" : "done") : true;
-  $("ctxNote").textContent = (ok ? "存好了。" : "說明改好了，但暫存沒寫成功，稍後會再試。")
-    + (recording ? "下一段起 AI 就照新的說明整理。" : "重新產生總結或心智圖時就會照新的說明；要整場重來就按「依說明重整這場」。");
+  $("ctxNote").textContent = (ok ? _("存好了。") : _("說明改好了，但暫存沒寫成功，稍後會再試。"))
+    + (recording ? _("下一段起 AI 就照新的說明整理。") : _("重新產生總結或心智圖時就會照新的說明；要整場重來就按「依說明重整這場」。"));
   renderRedo();
 }
 // 依說明重整這場（#191）：會議結束、有暫存、沒有在整理時才有；要按兩次（會重跑整場、用到 Claude 額度）
@@ -4466,14 +4500,14 @@ function redoCount() { return [...chunks.values()].filter((c) => (c.text || "").
 function renderRedo() {
   const b = $("ctxRedo");
   b.hidden = !(redoCount() && draftId && phase === "done" && !recording && !importing && !evtSrc);
-  if (!b.dataset.armed) b.textContent = "依說明重整這場";
+  if (!b.dataset.armed) b.textContent = _("依說明重整這場");
 }
 $("ctxRedo").onclick = () => {
   const b = $("ctxRedo");
   if (!b.dataset.armed) {
     b.dataset.armed = "1";
-    b.textContent = `確定重整 ${redoCount()} 段？再按一次`;
-    $("ctxNote").textContent = "會照視窗裡的說明（先幫你存好）重跑整場的校正、段落重點、即時摘要與總結，段落結果會被新的蓋掉、不能復原；產生過心智圖也會重產（舊的可以按復原拿回來）。會用到 Claude 額度。";
+    b.textContent = _("確定重整 {v} 段？再按一次", { v: redoCount() });
+    $("ctxNote").textContent = _("會照視窗裡的說明（先幫你存好）重跑整場的校正、段落重點、即時摘要與總結，段落結果會被新的蓋掉、不能復原；產生過心智圖也會重產（舊的可以按復原拿回來）。會用到 Claude 額度。");
     clearTimeout(b._t);
     b._t = setTimeout(() => { delete b.dataset.armed; renderRedo(); }, 5000);
     return;
@@ -4482,7 +4516,7 @@ $("ctxRedo").onclick = () => {
   // 視窗裡改了說明卻沒按「存好說明」：用視窗裡的那份（先存進暫存），不要拿舊的說明重跑整場
   if ($("ctxText").value.replace(/\r\n/g, "\n").trim() !== meetingContext) { setMeetingContext($("ctxText").value); putDraftMeta(recording ? "recording" : "done"); }
   ctxShow(false);
-  backfillAi({ redo: true }).catch((e) => setAiNote("依說明重整失敗：" + e.message, true)).finally(renderRedo);
+  backfillAi({ redo: true }).catch((e) => setAiNote(_("依說明重整失敗：") + e.message, true)).finally(renderRedo);
   renderRedo();
 };
 $("ctxOpen").onclick = () => { renderRedo(); ctxShow(true); };
@@ -4511,7 +4545,7 @@ const pageBuild = "__MS_BUILD__";   // 伺服器送出頁面時（或 deploy/bui
 let newBuild = false;   // 已確定有新版：被其他提醒蓋掉或錄音中收起後，閒下來再顯示
 let updateSnooze = 0;   // 使用者按掉提醒後，十分鐘內不再跳
 // AI 還在整理（等事件、重新產生總結／會議紀錄／心智圖／表單）：重新整理會讓這頁收不到結果，提醒延後（#126）
-const aiBusy = () => !!evtSrc || sumBusy || minBusy || mapBusy || formBusy;
+const aiBusy = () => !!evtSrc || sumBusy || minBusy || mapBusy || formBusy || !!modBusy;   // 延伸模組的結果不會自己寫進暫存，重新載入就沒了
 async function checkBuild() {
   if (recording || aiBusy() || document.hidden || !/^[0-9a-f]{12}$/.test(pageBuild)) return;
   if (!newBuild) {
@@ -4523,8 +4557,8 @@ async function checkBuild() {
     } catch (e) { return; /* 連不上就下次再看 */ }
   }
   if (recording || aiBusy() || alertKind || Date.now() < updateSnooze) return;
-  showAlert("Cyclone Scribe 有新版本，請重新整理這個頁面。還沒存到 Drive 的會議都在「最近的會議」裡。", "update",
-    { label: "重新整理", run: () => { if (!recording && !aiBusy()) location.reload(); else hideAlert("update"); } });
+  showAlert(_("Cyclone Scribe 有新版本，請重新整理這個頁面。還沒存到 Drive 的會議都在「最近的會議」裡。"), "update",
+    { label: _("重新整理"), run: () => { if (!recording && !aiBusy()) location.reload(); else hideAlert("update"); } });
 }
 checkBuild();
 setInterval(checkBuild, 60000);
@@ -4542,7 +4576,7 @@ document.addEventListener("visibilitychange", () => {
   keepAwake(true);
   const gone = hiddenAt ? Math.round((Date.now() - hiddenAt) / 1000) : 0;
   hiddenAt = 0;
-  if (touchOnly && gone >= 2) showAlert(`剛剛離開畫面約 ${gone} 秒（鎖螢幕或切到其他 App）。手機在這段時間可能沒有收音；錄音期間請讓這個畫面保持開著。`, "away");
+  if (touchOnly && gone >= 2) showAlert(_("剛剛離開畫面約 {gone} 秒（鎖螢幕或切到其他 App）。手機在這段時間可能沒有收音；錄音期間請讓這個畫面保持開著。", { gone }), "away");
 });
 
 // ---- 音量條：每秒約十次，跟著收到的聲音跳 ----
@@ -4582,7 +4616,7 @@ async function loadMics() {
   try { devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audioinput" && d.deviceId && d.deviceId !== "default" && d.deviceId !== "communications"); } catch (e) { devs = []; }
   const sel = $("micSel"), keep = store.get("ms.mic", "");
   sel.length = 1;
-  devs.forEach((d, i) => { const o = document.createElement("option"); o.value = d.deviceId; o.textContent = d.label || `麥克風 ${i + 1}`; sel.append(o); });
+  devs.forEach((d, i) => { const o = document.createElement("option"); o.value = d.deviceId; o.textContent = d.label || _("麥克風 {v}", { v: i + 1 }); sel.append(o); });
   sel.value = devs.some((d) => d.deviceId === keep) ? keep : "";
   micCount = devs.length;
   updateMicBox();
@@ -4605,7 +4639,7 @@ async function toggleMicTest() {
   } catch (e) {
     testBusy = false;
     ctx.close().catch(() => {}); if (testCtx === ctx) testCtx = null;
-    $("micHint").textContent = "沒辦法使用麥克風：" + (e.name === "NotAllowedError" ? "沒有允許權限" : e.message);
+    $("micHint").textContent = _("沒辦法使用麥克風：") + (e.name === "NotAllowedError" ? _("沒有允許權限") : e.message);
     return;
   }
   testBusy = false;
@@ -4619,8 +4653,8 @@ async function toggleMicTest() {
   an.fftSize = 512;
   ctx.createMediaStreamSource(s).connect(an);
   const buf = new Float32Array(an.fftSize);
-  $("micTest").textContent = "停止測試";
-  $("micHint").textContent = `目前收音：${testStream.getAudioTracks()[0]?.label || "麥克風"}。說句話，旁邊的音量條會跳。`;
+  $("micTest").textContent = _("停止測試");
+  $("micHint").textContent = _("目前收音：{v}。說句話，旁邊的音量條會跳。", { v: testStream.getAudioTracks()[0]?.label || _("麥克風") });
   let lvl = 0;
   const draw = () => {
     if (!testStream) return;
@@ -4641,7 +4675,7 @@ function endMicTest() {
   testStream = null;
   testCtx?.close().catch(() => {});   // 還在等權限的那個也一起關
   testCtx = null;
-  $("micTest").textContent = "測試麥克風";
+  $("micTest").textContent = _("測試麥克風");
   $("micMeter").style.setProperty("--lvl", "0");
 }
 $("micTest").onclick = toggleMicTest;
@@ -4726,12 +4760,12 @@ async function syncDraft(force = false) {
     const r = await postJson("/api/drafts/finals", { draft: id, from, tokens: batch });
     const j = await r.json().catch(() => ({}));
     if (id === draftId) {
-      if (r.ok || r.status === 409) { ok = true; draftSent = j.tokens ?? draftSent; draftAt = Date.now(); setDraftNote("已暫存"); }
+      if (r.ok || r.status === 409) { ok = true; draftSent = j.tokens ?? draftSent; draftAt = Date.now(); setDraftNote(_("已暫存")); }
       else if (r.status === 404) ok = await putDraftMeta(recording ? "recording" : "done");
-      else { draftFailed = r.status === 400 || r.status === 413; setDraftNote(draftFailed ? "這場不再暫存" : "暫存失敗，稍後再試", true); }
+      else { draftFailed = r.status === 400 || r.status === 413; setDraftNote(draftFailed ? _("這場不再暫存") : _("暫存失敗，稍後再試"), true); }
     }
   } catch (e) {
-    setDraftNote("暫存失敗，稍後再試", true);
+    setDraftNote(_("暫存失敗，稍後再試"), true);
   }
   draftBusy = false;
   if (id !== draftId || draftFailed) return;
@@ -4808,7 +4842,7 @@ function fmtWhen(ms) {
   if (!ms) return "";
   const d = new Date(ms), today = localDate(new Date());
   const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  return localDate(d) === today ? `今天 ${hm}` : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
+  return localDate(d) === today ? _("今天 {hm}", { hm }) : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
 }
 
 async function loadRecent() {
@@ -4825,30 +4859,30 @@ async function loadRecent() {
     main.className = "r-main";
     const t = document.createElement("span");
     t.className = "r-title";
-    t.textContent = x.title || "（沒有名稱）";
+    t.textContent = x.title || _("（沒有名稱）");
     // 還在「錄音中」但超過兩分鐘沒更新：多半是分頁被關掉或當機
     const stale = x.state === "recording" && Date.now() / 1000 - x.updated_at > 120;
     if (x.state === "recording" || x.ai_running) {
       const b = document.createElement("span");
       b.className = "r-badge";
-      b.textContent = x.state !== "recording" ? "AI 整理中" : stale ? "中斷" : "錄音中";
+      b.textContent = x.state !== "recording" ? _("AI 整理中") : stale ? _("中斷") : _("錄音中");
       t.append(b);
     }
     const m = document.createElement("span");
     m.className = "r-meta";
-    const mins = x.duration_ms ? `約 ${Math.max(1, Math.round(x.duration_ms / 60000))} 分鐘` : "";
-    m.textContent = [fmtWhen(x.started_at), x.place, mins, x.audio_bytes ? "含音檔" : ""].filter(Boolean).join("・");
+    const mins = x.duration_ms ? _("約 {v} 分鐘", { v: Math.max(1, Math.round(x.duration_ms / 60000)) }) : "";
+    m.textContent = [fmtWhen(x.started_at), x.place, mins, x.audio_bytes ? _("含音檔") : ""].filter(Boolean).join("・");
     main.append(t, m);
     const open = document.createElement("button");
     open.className = "btn";
-    open.textContent = "開啟";
+    open.textContent = _("開啟");
     open.onclick = () => openDraft(x.id, open);
     const del = document.createElement("button");
     del.className = "btn ghost r-del";
-    del.textContent = "刪除";
+    del.textContent = _("刪除");
     // 不用跳出確認框：按一次變「確定刪除？」，再按才刪
     del.onclick = async () => {
-      if (!del.dataset.armed) { del.dataset.armed = "1"; del.textContent = "確定刪除？"; setTimeout(() => { delete del.dataset.armed; del.textContent = "刪除"; }, 4000); return; }
+      if (!del.dataset.armed) { del.dataset.armed = "1"; del.textContent = _("確定刪除？"); setTimeout(() => { delete del.dataset.armed; del.textContent = _("刪除"); }, 4000); return; }
       await postJson("/api/drafts/delete", { draft: x.id, stop_ai: true }).catch(() => {});
       loadRecent();
     };
@@ -4875,7 +4909,7 @@ async function openDraft(id, btn) {
     if (!r.ok) throw new Error(j.error || r.status);
   } catch (e) {
     btn.disabled = false;
-    setStatus("打不開這場暫存：" + e.message, true);
+    setStatus(_("打不開這場暫存：") + e.message, true);
     return;
   }
   // 還原成「會後」狀態：逐字稿重建時間軸，AI 結果放回側欄與時間軸
@@ -4903,7 +4937,7 @@ async function openDraft(id, btn) {
     addCard(c.idx, c.start, c.end);
     Object.assign(chunks.get(c.idx), { start: c.start, end: c.end, text: c.text, lastSegIdx: c.seg, lastSeg: c.seg != null ? segs[c.seg] : null });
     if (c.corrected) showChunkResult({ idx: c.idx, summary: c.summary, corrected: c.corrected, readable: c.readable, new_topic: c.new_topic });
-    else if (c.error || !ag) showChunkResult({ idx: c.idx, error: c.error || "沒有整理結果" });
+    else if (c.error || !ag) showChunkResult({ idx: c.idx, error: c.error || _("沒有整理結果") });
     chunkIdx = Math.max(chunkIdx, c.idx);
   }
   aiUsage = ai.usage || null; extraUsage = ai.extra_usage || null;
@@ -4928,10 +4962,10 @@ async function openDraft(id, btn) {
     rememberAiDraft(id);
     openEvents();
     if (ag.waiting) showAiStatus({ state: "waiting" });
-    else setAiNote(ag.ending ? RESUME_NOTE : "這場還在別的頁面錄音中，這裡會跟著顯示 AI 整理的結果。");
+    else setAiNote(ag.ending ? RESUME_NOTE : _("這場還在別的頁面錄音中，這裡會跟著顯示 AI 整理的結果。"));
   }
   btn.disabled = false;
-  setStatus(meta.state === "recording" ? "這場在錄音中斷掉，以下是最後暫存到的內容" : "已從暫存打開");
+  setStatus(meta.state === "recording" ? _("這場在錄音中斷掉，以下是最後暫存到的內容") : _("已從暫存打開"));
   setPhase("done");
   $("dl").disabled = finals.length === 0;
   $("saveAudio").checked = draftAudioBytes() > 0 && store.get("ms.saveAudio", "1") === "1";
@@ -4993,7 +5027,7 @@ async function loadDriveRoots() {
   const last = store.get("ms.root", "");
   if (driveRoots.some((r) => r.id === last)) sel.value = last;
   // browser 模式已經有自己的根資料夾（例如「會議紀錄（meeting-scribe）」），預設直接放在裡面
-  $("saveFolder").value = store.get("ms.folder", driveMode === "browser" ? "" : "會議紀錄");
+  $("saveFolder").value = store.get("ms.folder", driveMode === "browser" ? "" : "會議紀錄");   // 不翻：資料夾名稱，會記在 ms.folder
   $("saveAudio").checked = store.get("ms.saveAudio", "1") === "1";
   updateSavePanel();
   gRootRefresh();
@@ -5004,8 +5038,8 @@ function updateSaveWhere() {
   const root = driveRoots.find((r) => r.id === $("saveRoot").value);
   // 子資料夾照存檔時一樣一層一層用「／」分開，預覽才跟存好後的訊息一致
   const sub = $("saveFolder").value.split("/").map((x) => x.trim()).filter((x) => x && x !== ".");
-  const where = driveMode === "browser" ? ["Google Drive", googleCfg && gRootName(), ...sub] : [root?.label, ...(sub.length ? sub : ["會議紀錄"])];
-  $("saveWhereText").textContent = where.filter(Boolean).join("／") + ($("saveAudio").checked ? "，含音檔" : "");
+  const where = driveMode === "browser" ? ["Google Drive", googleCfg && gRootName(), ...sub] : [root?.label, ...(sub.length ? sub : ["會議紀錄"])];   // 不翻：預覽要跟實際存的資料夾一樣
+  $("saveWhereText").textContent = where.filter(Boolean).join(_("／")) + ($("saveAudio").checked ? _("，含音檔") : "");
 }
 $("saveRoot").onchange = () => { store.set("ms.root", $("saveRoot").value); updateSaveWhere(); };
 $("saveFolder").onchange = () => { store.set("ms.folder", $("saveFolder").value.trim()); updateSaveWhere(); };
@@ -5035,7 +5069,7 @@ async function saveLocal(snap) {
   $("saveBtn").disabled = true;
   $("dockNext").disabled = $("discardBtn").disabled = true;
   $("btn").disabled = true;
-  setSaveStatus("儲存逐字稿…");
+  setSaveStatus(_("儲存逐字稿…"));
   try {
     const r = await fetch(api("/api/save/transcript"), {
       method: "POST",
@@ -5048,30 +5082,30 @@ async function saveLocal(snap) {
     store.set("ms.folder", folder);
     let extra = "";
     if (withAudio && dId && await draftAudioReady(done)) {
-      setSaveStatus(`儲存音檔（從${hostName}的暫存複製）…`);
+      setSaveStatus(_("儲存音檔（從{host}的暫存複製）…", { host: hostName }));
       const r2 = await postJson("/api/save/draft-audio", { root, meeting: j.meeting, draft: dId });
       const j2 = await r2.json().catch(() => ({}));
-      if (r2.ok) extra = `，含音檔 ${(j2.bytes / 1048576).toFixed(1)} MB`;
-      else if (r2.status !== 404 || !chunks.length) throw new Error(`逐字稿已存，但音檔失敗：${j2.error || r2.status}`);
+      if (r2.ok) extra = _("，含音檔 {v} MB", { v: (j2.bytes / 1048576).toFixed(1) });
+      else if (r2.status !== 404 || !chunks.length) throw new Error(_("逐字稿已存，但音檔失敗：{v}", { v: j2.error || r2.status }));
     }
     if (withAudio && !extra && chunks.length) {
       await done;
       const blob = new Blob(chunks, { type: mime });
-      setSaveStatus(`儲存音檔（${(blob.size / 1048576).toFixed(1)} MB）…`);
+      setSaveStatus(_("儲存音檔（{v} MB）…", { v: (blob.size / 1048576).toFixed(1) }));
       const qs = new URLSearchParams({ root, meeting: j.meeting, ext: audioExt(mime) });
       const r2 = await fetch(api(`/api/save/audio?${qs}`), { method: "POST", body: blob, headers: { "X-Meeting-Scribe": "1" } });
       const j2 = await r2.json().catch(() => ({}));
-      if (!r2.ok) throw new Error(`逐字稿已存，但音檔失敗：${j2.error || r2.status}`);
-      extra = `，含音檔 ${(j2.bytes / 1048576).toFixed(1)} MB`;
+      if (!r2.ok) throw new Error(_("逐字稿已存，但音檔失敗：{v}", { v: j2.error || r2.status }));
+      extra = _("，含音檔 {v} MB", { v: (j2.bytes / 1048576).toFixed(1) });
     }
-    const what = ["逐字稿", summaryMd && "總結", extras.length && `延伸 ${extras.length} 份`, minutesMd && "會議紀錄", mindmapMd && "心智圖"].filter(Boolean).join("、");
+    const what = [_("逐字稿"), summaryMd && _("總結"), extras.length && _("延伸 {n} 份", { n: extras.length }), minutesMd && _("會議紀錄"), mindmapMd && _("心智圖")].filter(Boolean).join(_("、"));
     if (mid === meetingId) { savedOk = true; updateDock(); }
     // 存好了：主機 上的暫存不再需要（使用者選「存到 Drive 就刪」）
     if (dId) { postJson("/api/drafts/delete", { draft: dId }).catch(() => {}); if (dId === draftId) { draftId = null; $("draftHelp").hidden = true; } }
-    const formSkipped = form && !formBody ? "；表單紀錄沒附：這台的擴充包找不到這種表單" : "";
-    setSaveStatus(`已存到：${j.display}（${what}${formBody ? "、表單紀錄" : ""}${extra}）${summaryLater ? "；總結還在產生，這次沒存到" : ""}${formSkipped}`, "ok");
+    const formSkipped = form && !formBody ? _("；表單紀錄沒附：這台的擴充包找不到這種表單") : "";
+    setSaveStatus(_("已存到：{display}（{what}{v}{extra}）{v2}{formSkipped}", { display: j.display, what, v: formBody ? _("、表單紀錄") : "", extra, v2: summaryLater ? _("；總結還在產生，這次沒存到") : "", formSkipped }), "ok");
   } catch (e) {
-    setSaveStatus("儲存失敗：" + e.message, "err");
+    setSaveStatus(_("儲存失敗：") + e.message, "err");
   } finally {
     $("saveBtn").disabled = false;
     $("dockNext").disabled = $("discardBtn").disabled = false;
@@ -5096,10 +5130,10 @@ const MULTIPART_MAX = 4 * 1024 * 1024;   // 一次傳完（multipart）只給小
 let gToken = null;                   // {token, exp}
 const gUploads = new Map();          // 「資料夾 id/檔名」→ 續傳網址：授權過期或斷線後，同一個分頁裡從中斷的位置接著傳
 let gAuthPending = null;
-class NeedAuth extends Error { constructor() { super("Google 授權過期"); } }
+class NeedAuth extends Error { constructor() { super(_("Google 授權過期")); } }
 const gWait = (ms) => new Promise((r) => setTimeout(r, ms));
 const gHex = (n) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, "0")).join("");
-const gErrText = (e) => (e instanceof TypeError ? "網路中斷" : e.message);
+const gErrText = (e) => (e instanceof TypeError ? _("網路中斷") : e.message);
 const gMb = (n) => (n / 1048576).toFixed(1);
 
 function driveReady() { return driveMode === "browser" ? !!googleCfg : driveRoots.length > 0; }
@@ -5123,12 +5157,12 @@ const gTokenOk = (ms = 0) => !!gToken && gToken.exp - ms > Date.now();
 
 // 開 Google 登入視窗拿 token。一定要在使用者點擊的當下呼叫：不是點擊開的彈出視窗會被瀏覽器擋掉
 function googleAuth() {
-  if (!googleCfg) return Promise.reject(new Error("主機還沒設定 Google OAuth client ID（見 docs/drive-browser.md）"));
+  if (!googleCfg) return Promise.reject(new Error(_("主機還沒設定 Google OAuth client ID（見 docs/drive-browser.md）")));
   const state = gHex(16);
   const q = new URLSearchParams({ client_id: googleCfg.client_id, redirect_uri: location.origin + "/oauth/", response_type: "token",
     scope: GOOGLE.scope, state, include_granted_scopes: "true" });
   const w = window.open(`${GOOGLE.auth}?${q}`, "ms-google-auth", "popup,width=500,height=680");
-  if (!w) return Promise.reject(new Error("瀏覽器擋下了 Google 登入視窗：請允許這個網站開彈出視窗，再按一次"));
+  if (!w) return Promise.reject(new Error(_("瀏覽器擋下了 Google 登入視窗：請允許這個網站開彈出視窗，再按一次")));
   if (gAuthPending) gAuthPending.cancel();
   return new Promise((resolve, reject) => {
     let ch = null, timer = 0;
@@ -5144,18 +5178,18 @@ function googleAuth() {
       if (!d || d.state !== state) return;
       end();
       if (d.error || !d.access_token) {
-        reject(new Error(d.error === "access_denied" ? "沒有同意讓 Cyclone Scribe 存取 Google Drive" : `Google 授權失敗（${d.error || "沒有拿到 token"}）`));
+        reject(new Error(d.error === "access_denied" ? _("沒有同意讓 Cyclone Scribe 存取 Google Drive") : _("Google 授權失敗（{v}）", { v: d.error || _("沒有拿到 token") })));
         return;
       }
-      if (d.scope && !d.scope.split(" ").includes(GOOGLE.scope)) { reject(new Error("授權時沒有勾選 Google Drive 的權限，請再按一次並勾選")); return; }
+      if (d.scope && !d.scope.split(" ").includes(GOOGLE.scope)) { reject(new Error(_("授權時沒有勾選 Google Drive 的權限，請再按一次並勾選"))); return; }
       gTokenSet(d.access_token, Number(d.expires_in) || 3600);
       resolve();
     };
     const onWin = (e) => { if (e.origin === location.origin && e.data && e.data.msGoogleAuth) got(e.data.msGoogleAuth); };
     try { ch = new BroadcastChannel("ms-google-auth"); ch.onmessage = (e) => got(e.data); } catch (e) { /* 只靠 opener */ }
     window.addEventListener("message", onWin);
-    timer = setTimeout(() => { end(); reject(new Error("等不到 Google 授權（超過 5 分鐘），請再按一次")); }, 5 * 60 * 1000);
-    me.cancel = () => { end(); reject(new Error("已改用新的授權視窗")); };
+    timer = setTimeout(() => { end(); reject(new Error(_("等不到 Google 授權（超過 5 分鐘），請再按一次"))); }, 5 * 60 * 1000);
+    me.cancel = () => { end(); reject(new Error(_("已改用新的授權視窗"))); };
     gAuthPending = me;
   });
 }
@@ -5168,8 +5202,8 @@ async function gfetch(url, opt = {}) {
 }
 async function gErr(r, what) {
   const j = await r.json().catch(() => ({}));
-  const msg = j.error && j.error.message ? "：" + String(j.error.message).slice(0, 120) : "";
-  const e = new Error(`${what}${/[\x21-\x7e]$/.test(what) ? " " : ""}失敗（Google 回 ${r.status}${msg}）`);
+  const msg = j.error && j.error.message ? _("：") + String(j.error.message).slice(0, 120) : "";
+  const e = new Error(_("{what}{v}失敗（Google 回 {status}{msg}）", { what, v: /[\x21-\x7e]$/.test(what) ? " " : "", status: r.status, msg }));
   // 5xx、429、403 的額度／限流可以等一下再試；其他 4xx 再試也一樣
   e.retry = r.status >= 500 || r.status === 429 || r.status === 408 || (r.status === 403 && /rate|quota/i.test(JSON.stringify(j.error || {})));
   return e;
@@ -5195,7 +5229,7 @@ async function gList(q) {
   do {
     const qs = new URLSearchParams({ q, fields: "nextPageToken,files(id,name,size,mimeType)", pageSize: "1000", spaces: "drive" });
     if (page) qs.set("pageToken", page);
-    const j = await gjson(`${GOOGLE.files}?${qs}`, {}, "查詢 Drive");
+    const j = await gjson(`${GOOGLE.files}?${qs}`, {}, _("查詢 Drive"));
     out.push(...(j.files || []));
     page = j.nextPageToken || "";
   } while (page);
@@ -5205,12 +5239,12 @@ function gCreateFolder(name, parent, props) {
   return gjson(`${GOOGLE.files}?fields=id,name`, {
     method: "POST", headers: { "Content-Type": "application/json; charset=UTF-8" },
     body: JSON.stringify({ name, mimeType: GFOLDER, ...(parent ? { parents: [parent] } : {}), ...(props ? { appProperties: props } : {}) }),
-  }, "建立 Drive 資料夾");
+  }, _("建立 Drive 資料夾"));
 }
 // 資料夾還在、沒被丟到垃圾桶就回 {id, name}，不然回 null（找不到或沒權限就當不在；斷線與授權過期照常往上丟）
 async function gFolder(id) {
   try {
-    const f = await gjson(`${GOOGLE.files}/${encodeURIComponent(id)}?fields=id,name,trashed`, {}, "查詢 Drive 資料夾");
+    const f = await gjson(`${GOOGLE.files}/${encodeURIComponent(id)}?fields=id,name,trashed`, {}, _("查詢 Drive 資料夾"));
     return f.trashed ? null : { id: f.id || id, name: typeof f.name === "string" ? f.name : "" };
   } catch (e) {
     if (e instanceof NeedAuth || e instanceof TypeError || e.retry) throw e;
@@ -5285,7 +5319,7 @@ function gMultipart(parent, name, type, content) {
   ]);
   return gjson(`${GOOGLE.upload}?uploadType=multipart&fields=id,name,size`, {
     method: "POST", headers: { "Content-Type": `multipart/related; boundary=${boundary}` }, body,
-  }, `上傳 ${name}`);
+  }, _("上傳 {name}", { name }));
 }
 // 續傳網址的狀態：{file}＝已傳完、{at}＝下一個要傳的位置、{gone}＝網址過期（一週）要重來
 function gNext(r) { const m = /bytes=0-(\d+)/.exec(r.headers.get("Range") || ""); return m ? Number(m[1]) + 1 : 0; }
@@ -5294,7 +5328,7 @@ async function gStatus(uri, total) {
   if (r.status === 200 || r.status === 201) return { file: await r.json().catch(() => ({})) };
   if (r.status === 308) return { at: gNext(r) };
   if (r.status === 404 || r.status === 410) return { gone: true };
-  throw await gErr(r, "查詢續傳進度");
+  throw await gErr(r, _("查詢續傳進度"));
 }
 // 大檔（音檔）分段續傳：每段傳完 Google 回 308 和收到哪裡；斷線或 Google 出錯就問它收到哪裡，從那裡接著傳
 async function gResumable(parent, name, type, blob, progress, restarts = 0) {
@@ -5312,11 +5346,11 @@ async function gResumable(parent, name, type, blob, progress, restarts = 0) {
         headers: { "Content-Type": "application/json; charset=UTF-8", "X-Upload-Content-Type": type, "X-Upload-Content-Length": String(total) },
         body: JSON.stringify({ name, parents: [parent], mimeType: type }),
       });
-      if (!x.ok) throw await gErr(x, `開始上傳 ${name}`);
+      if (!x.ok) throw await gErr(x, _("開始上傳 {name}", { name }));
       return x;
     });
     uri = r.headers.get("Location");
-    if (!uri) throw new Error(`開始上傳 ${name} 失敗（Google 沒有給續傳網址）`);
+    if (!uri) throw new Error(_("開始上傳 {name} 失敗（Google 沒有給續傳網址）", { name }));
     gUploads.set(key, uri);
   }
   for (;;) {
@@ -5334,19 +5368,19 @@ async function gResumable(parent, name, type, blob, progress, restarts = 0) {
       if (next > at) { at = next; stuck = 0; continue; }
     } else if (r && (r.status === 404 || r.status === 410)) {
       gUploads.delete(key);
-      if (restarts >= 2) throw new Error(`上傳 ${name} 失敗（續傳網址一直失效）`);
+      if (restarts >= 2) throw new Error(_("上傳 {name} 失敗（續傳網址一直失效）", { name }));
       return gResumable(parent, name, type, blob, progress, restarts + 1);
     } else if (r) {
-      const e = await gErr(r, `上傳 ${name}`);
+      const e = await gErr(r, _("上傳 {name}", { name }));
       if (!e.retry) { gUploads.delete(key); throw e; }
     }
-    if (++stuck > 6) throw new Error(`上傳 ${name} 一直中斷（網路不穩）；再按一次會從中斷的地方接著傳`);
+    if (++stuck > 6) throw new Error(_("上傳 {name} 一直中斷（網路不穩）；再按一次會從中斷的地方接著傳", { name }));
     await gWait(Math.min(16000, DRIVE_BACKOFF * 2 ** (stuck - 1)));
     const s = await gRetry(() => gStatus(uri, total));
     if (s.file) { gUploads.delete(key); progress(total, total); return s.file; }
     if (s.gone) {
       gUploads.delete(key);
-      if (restarts >= 2) throw new Error(`上傳 ${name} 失敗（續傳網址一直失效）`);
+      if (restarts >= 2) throw new Error(_("上傳 {name} 失敗（續傳網址一直失效）", { name }));
       return gResumable(parent, name, type, blob, progress, restarts + 1);
     }
     at = s.at;
@@ -5370,12 +5404,12 @@ async function gAudioSources(s) {
   if (s.dId && await draftAudioReady(s.done)) {
     const r = await fetch(api(`/api/drafts/audio-list?${new URLSearchParams({ draft: s.dId })}`));
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(`讀不到主機暫存的音檔（${j.error || "HTTP " + r.status}）`);
+    if (!r.ok) throw new Error(_("讀不到主機暫存的音檔（{v}）", { v: j.error || "HTTP " + r.status }));
     return (j.parts || []).map((p) => ({ ...p, blob: () => gRetry(async () => {
       const x = await fetch(api(`/api/drafts/audio-file?${new URLSearchParams({ draft: s.dId, part: p.part })}`));
-      if (!x.ok) { const e = new Error(`從主機拿音檔失敗（HTTP ${x.status}）`); e.retry = x.status >= 500; throw e; }
+      if (!x.ok) { const e = new Error(_("從主機拿音檔失敗（HTTP {status}）", { status: x.status })); e.retry = x.status >= 500; throw e; }
       const b = await x.blob();
-      if (b.size !== p.bytes) { const e = new Error("從主機拿音檔沒有拿完整"); e.retry = true; throw e; }
+      if (b.size !== p.bytes) { const e = new Error(_("從主機拿音檔沒有拿完整")); e.retry = true; throw e; }
       return b;
     }) }));
   }
@@ -5391,7 +5425,7 @@ function gJobKey(s) { return `ms.drive.job.${s.dId || s.mid}`; }
 // 存到 Google Drive：沒有 token（或快過期）就在這次點擊裡先開 Google 登入視窗，授權好再接著存
 function saveToGoogle(snap) {
   if (gTokenOk(5 * 60 * 1000)) return saveGoogleRun(snap);
-  setSaveStatus("等待 Google 授權…（在跳出的視窗登入並同意）");
+  setSaveStatus(_("等待 Google 授權…（在跳出的視窗登入並同意）"));
   return googleAuth().then(() => saveGoogleRun(snap), (e) => setSaveStatus(e.message, "err"));
 }
 
@@ -5405,13 +5439,13 @@ async function saveGoogleRun(s) {
   const ok = [], failed = [];
   let audioBytes = 0;
   try {
-    setSaveStatus("整理要存的檔…");
+    setSaveStatus(_("整理要存的檔…"));
     const r = await postJson("/api/save/bundle", { folder: s.folder, title: s.title, stamp: gStamp(), transcript: s.transcript, summary: s.summaryMd, extras: s.extras,
       minutes: s.minutesMd, mindmap: s.mindmapMd, mindmap_svg: s.mindmapSvg, mindmap_opml: s.mindmapOpmlText, form: s.formBody });
     const b = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
     store.set("ms.folder", s.folder);
-    setSaveStatus("連到 Google Drive…");
+    setSaveStatus(_("連到 Google Drive…"));
     let parent = await gRoot();
     for (const seg of b.folder || []) parent = await gChildFolder(parent, seg);
     let job = null;
@@ -5419,52 +5453,52 @@ async function saveGoogleRun(s) {
     const reuse = job && typeof job.id === "string" && job.parent === parent && await gRetry(() => gAlive(job.id));
     const folder = reuse ? job : { ...(await gMeetingFolder(parent, b.name)), parent };
     if (!reuse) store.set(gJobKey(s), JSON.stringify(folder));
-    const where = ["Google Drive", gRootName(), ...(b.folder || []), folder.name].join("／");
+    const where = ["Google Drive", gRootName(), ...(b.folder || []), folder.name].join(_("／"));
     const have = new Map((await gRetry(() => gList(`${gq(folder.id)} in parents and trashed = false`))).map((f) => [f.name, f]));
     for (const f of b.files || []) {
       if (have.has(f.name)) { ok.push(f.name); continue; }
-      setSaveStatus(`上傳 ${f.name}…`);
+      setSaveStatus(_("上傳 {name}…", { name: f.name }));
       try {
         const content = f.base64 !== undefined ? new Blob([Uint8Array.from(atob(f.base64), (c) => c.charCodeAt(0))], { type: f.type }) : f.text;
         await gPut(folder.id, f.name, f.type, content, () => {});
         ok.push(f.name);
       } catch (e) {
         if (e instanceof NeedAuth) throw e;
-        failed.push(`${f.name}（${gErrText(e)}）`);
+        failed.push(_("{name}（{v}）", { name: f.name, v: gErrText(e) }));
       }
     }
     if (s.withAudio) {
-      setSaveStatus("準備音檔…");
+      setSaveStatus(_("準備音檔…"));
       let sources = [];
-      try { sources = await gAudioSources(s); } catch (e) { failed.push(`音檔（${gErrText(e)}）`); }
+      try { sources = await gAudioSources(s); } catch (e) { failed.push(_("音檔（{v}）", { v: gErrText(e) })); }
       for (const a of sources) {
         const prev = have.get(a.name);
         if (prev && Number(prev.size) === a.bytes) { ok.push(a.name); audioBytes += a.bytes; continue; }
         try {
-          setSaveStatus(`準備 ${a.name}（${gMb(a.bytes)} MB）…`);
+          setSaveStatus(_("準備 {name}（{v} MB）…", { name: a.name, v: gMb(a.bytes) }));
           const blob = await a.blob();
-          await gResumable(folder.id, a.name, a.type, blob, (at, total) => setSaveStatus(`上傳 ${a.name}：${gMb(at)}／${gMb(total)} MB`));
+          await gResumable(folder.id, a.name, a.type, blob, (at, total) => setSaveStatus(_("上傳 {name}：{v}／{v2} MB", { name: a.name, v: gMb(at), v2: gMb(total) })));
           ok.push(a.name);
           audioBytes += a.bytes;
         } catch (e) {
           if (e instanceof NeedAuth) throw e;
-          failed.push(`${a.name}（${gErrText(e)}）`);
+          failed.push(_("{name}（{v}）", { name: a.name, v: gErrText(e) }));
         }
       }
     }
     if (failed.length) {
-      setSaveStatus(`存到 ${where}：${failed.join("、")} 沒有上傳成功${ok.length ? `（已上傳：${ok.join("、")}）` : ""}。再按一次「存到 Drive」只補傳沒成功的檔；這場的暫存先留著。`, "err");
+      setSaveStatus(_("存到 {where}：{v} 沒有上傳成功{v2}。再按一次「存到 Drive」只補傳沒成功的檔；這場的暫存先留著。", { where, v: failed.join(_("、")), v2: ok.length ? _("（已上傳：{v}）", { v: ok.join(_("、")) }) : "" }), "err");
       return;
     }
     try { localStorage.removeItem(gJobKey(s)); } catch (e) { /* 沒記就算了 */ }
     if (s.mid === meetingId) { savedOk = true; updateDock(); }
     if (s.dId) { postJson("/api/drafts/delete", { draft: s.dId }).catch(() => {}); if (s.dId === draftId) { draftId = null; $("draftHelp").hidden = true; } }
-    const what = ["逐字稿", s.summaryMd && "總結", s.extras.length && `延伸 ${s.extras.length} 份`, s.minutesMd && "會議紀錄", s.mindmapMd && "心智圖", s.formBody && "表單紀錄"].filter(Boolean).join("、");
-    const formSkipped = form && !s.formBody ? "；表單紀錄沒附：這台的擴充包找不到這種表單" : "";
-    setSaveStatus(`已存到：${where}（${what}${audioBytes ? `，含音檔 ${gMb(audioBytes)} MB` : ""}）${s.summaryLater ? "；總結還在產生，這次沒存到" : ""}${formSkipped}`, "ok");
+    const what = [_("逐字稿"), s.summaryMd && _("總結"), s.extras.length && _("延伸 {n} 份", { n: s.extras.length }), s.minutesMd && _("會議紀錄"), s.mindmapMd && _("心智圖"), s.formBody && _("表單紀錄")].filter(Boolean).join(_("、"));
+    const formSkipped = form && !s.formBody ? _("；表單紀錄沒附：這台的擴充包找不到這種表單") : "";
+    setSaveStatus(_("已存到：{where}（{what}{v}）{v2}{formSkipped}", { where, what, v: audioBytes ? _("，含音檔 {v} MB", { v: gMb(audioBytes) }) : "", v2: s.summaryLater ? _("；總結還在產生，這次沒存到") : "", formSkipped }), "ok");
   } catch (e) {
-    if (e instanceof NeedAuth) setSaveStatus(`Google 授權過期${ok.length ? `（已上傳：${ok.join("、")}）` : ""}：再按一次「存到 Drive」重新授權，會從中斷的地方接著傳。`, "err");
-    else setSaveStatus("儲存失敗：" + gErrText(e), "err");
+    if (e instanceof NeedAuth) setSaveStatus(_("Google 授權過期{v}：再按一次「存到 Drive」重新授權，會從中斷的地方接著傳。", { v: ok.length ? _("（已上傳：{v}）", { v: ok.join(_("、")) }) : "" }), "err");
+    else setSaveStatus(_("儲存失敗：") + gErrText(e), "err");
   } finally {
     $("saveBtn").disabled = false;
     $("dockNext").disabled = $("discardBtn").disabled = false;
@@ -5478,11 +5512,11 @@ function updateGdrive() {
   if (driveMode !== "browser") return;
   const on = gTokenOk(), name = gRootName();
   const until = on ? new Date(gToken.exp).toTimeString().slice(0, 5) : "";
-  $("gdriveNote").textContent = !googleCfg ? "這台主機設定成由瀏覽器直接存到 Google Drive，但還沒設定 Google OAuth client ID，暫時不能存。"
-    : (on ? `已連接 Google Drive（這個分頁到 ${until} 前有效）。` : "存檔時會跳出 Google 登入視窗，請同意讓 Cyclone Scribe 存取它自己建立的檔案。")
-      + `會議會存在 Drive 的「${name}」資料夾；這個資料夾可以在 Drive 上改名、搬到「我的雲端硬碟」的其他位置，但不要刪除或丟到垃圾桶。`;
+  $("gdriveNote").textContent = !googleCfg ? _("這台主機設定成由瀏覽器直接存到 Google Drive，但還沒設定 Google OAuth client ID，暫時不能存。")
+    : (on ? _("已連接 Google Drive（這個分頁到 {until} 前有效）。", { until }) : _("存檔時會跳出 Google 登入視窗，請同意讓 Cyclone Scribe 存取它自己建立的檔案。"))
+      + _("會議會存在 Drive 的「{name}」資料夾；這個資料夾可以在 Drive 上改名、搬到「我的雲端硬碟」的其他位置，但不要刪除或丟到垃圾桶。", { name });
   $("gdriveConnect").hidden = !googleCfg;
-  $("gdriveConnect").textContent = on ? "重新連接" : "連接 Google Drive";
+  $("gdriveConnect").textContent = on ? _("重新連接") : _("連接 Google Drive");
   $("gdriveForget").hidden = !on;
 }
 $("gdriveConnect").onclick = () => { googleAuth().then(() => { updateGdrive(); gRootRefresh(); }, (e) => { $("gdriveNote").textContent = e.message; }); };

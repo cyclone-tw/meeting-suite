@@ -429,6 +429,11 @@ MAX_VOCAB_BYTES = 1024 * 1024
 _VOCAB_CACHE = {}
 
 
+# 講者編號（#198）：「講者 1」是語音辨識依聲音分的、每場都不同，對應到誰只對那一場有意義。
+# 放進每場都用的對照會把之後每一場的講者一都改成同一個人，所以對照表與共用正本一律不收
+SPEAKER_LABEL = re.compile(r"^\s*(?:講者|說話者|發言者|發言人|speaker)\s*[0-9０-９一二三四五六七八九十]", re.I)
+
+
 def parse_shared_vocabulary(text):
     """回傳 {"terms": [詞], "fixed": [(錯, 對)], "hints": [(錯, 對, 備註)]}；沒有「## 固定替換」那段（標題被改壞）就當整份壞掉，回 None。"""
     terms, fixed, hints = [], {}, []
@@ -455,7 +460,7 @@ def parse_shared_vocabulary(text):
         n = VOCAB_NOTE.match(right)
         if n:
             right, note = n.group(1).strip(), n.group(2).strip()
-        if not wrong or not right or wrong == right:
+        if not wrong or not right or wrong == right or SPEAKER_LABEL.match(wrong):
             continue
         if section != "fixed" or note or VOCAB_ONE_CJK.match(wrong):
             hints.append((wrong, right, note))
@@ -582,8 +587,8 @@ def _correction_pair(kind, x):
     if not isinstance(x, list) or len(x) != 2 or not all(isinstance(s, str) for s in x):
         raise ValueError("對照格式錯誤")
     wrong, right = x[0].strip(), x[1].strip()
-    if not wrong or not right or wrong == right:
-        return None
+    if not wrong or not right or wrong == right or SPEAKER_LABEL.match(wrong):
+        return None   # 講者對應（#198）：舊資料讀檔時略過，存檔時丟掉
     if max(len(wrong), len(right)) > MAX_CORRECTION_CHARS or any(ord(c) < 32 for c in wrong + right):
         raise ValueError("單一對照太長或有不合法字元")
     # 一律替換是純字串取代，一個字的錯字會把整份逐字稿改壞

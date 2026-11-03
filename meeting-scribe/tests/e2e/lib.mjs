@@ -78,11 +78,12 @@ export async function startStatic(port, dir) {
 // 無頭 Chrome；wav 給假麥克風用（不給就沒有麥克風）
 // init：每次載入頁面前先在頁面裡執行的程式（換掉外部服務用，#105）；before(page)：第一次打開網址前先做（例如開 CDP 功能）
 // args：額外的 Chrome 參數（例如把某個 port 當成公開網路，#106）
-export async function openPage(url, { wav, init, before, args: extra = [], port = 9400 + Math.floor(Math.random() * 400) } = {}) {
+// lang：瀏覽器語言（#195 介面跟著它走）；預設中文，其他情境的中文斷言才對得上
+export async function openPage(url, { wav, init, before, args: extra = [], lang = "zh-TW", port = 9400 + Math.floor(Math.random() * 400) } = {}) {
   const dir = tmpdir("chrome");
   const args = ["--headless=new", `--remote-debugging-port=${port}`, `--user-data-dir=${dir}`, "--no-first-run",
     "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", "--autoplay-policy=no-user-gesture-required",
-    "--disable-features=AudioServiceSandbox,AudioServiceOutOfProcess"];
+    "--disable-features=AudioServiceSandbox,AudioServiceOutOfProcess", `--lang=${lang}`, `--accept-lang=${lang}`];
   if (wav) args.push(`--use-file-for-fake-audio-capture=${wav}`);
   args.push(...extra);
   const chrome = spawn(CHROME, [...args, "about:blank"], { stdio: "ignore" });

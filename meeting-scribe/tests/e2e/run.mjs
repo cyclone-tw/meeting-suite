@@ -19,7 +19,7 @@ async function cleanupAll() { for (const c of [...live]) { await c(); live.delet
 process.on("SIGINT", async () => { await cleanupAll(); fs.rmSync(fixtures, { recursive: true, force: true }); process.exit(130); });
 
 // pre(work)：開服務前先準備 WORKDIR；init／before 傳給 openPage；host 換成 localhost 才能用 passkey（WebAuthn 不接受 IP）
-async function withEnv(fn, { wav = SPEECH, pre, init, before, host = "127.0.0.1" } = {}) {
+async function withEnv(fn, { wav = SPEECH, pre, init, before, host = "127.0.0.1", lang } = {}) {
   const port = nextPort++, work = tmpdir("work");
   const ctx = { port, work, url: `http://${host}:${port}/` };
   const cleanup = async () => {
@@ -32,7 +32,7 @@ async function withEnv(fn, { wav = SPEECH, pre, init, before, host = "127.0.0.1"
     if (pre) pre(work);
     ctx.server = await startServer(port, work);
     // init 可以是函式：要等服務起來才知道的東西（例如假 Google 的網址，#107）
-    ctx.page = await openPage(ctx.url, { wav, init: typeof init === "function" ? init(ctx) : init, before });
+    ctx.page = await openPage(ctx.url, { wav, init: typeof init === "function" ? init(ctx) : init, before, lang });
     await fn(ctx);
   } finally {
     live.delete(cleanup);
@@ -676,6 +676,44 @@ const SCENARIOS = {
       await p.ev(`nfPairs = [{ wrong: "書上", right: "學障", on: true }]; resetAi(); true`);
       assert(await p.ev("nfPairs.length === 0 && nameFixes.length === 0 && !nfBusy"), "新的一場不能帶著上一場的更正");
     }, { wav: SILENT });
+  },
+
+  async "ui-lang"() {
+    // 介面中英切換（#195）：英文瀏覽器沒選過就用英文；靜態畫面全換掉；錄音中不能切；切回中文會記住
+    await withEnv(async ({ page: p }) => {
+      assert(await p.ev(`UI_LANG === "en" && document.documentElement.lang === "en"`), "英文瀏覽器沒選過語言就用英文");
+      assert(await p.ev(`!document.documentElement.classList.contains("i18n-wait") && getComputedStyle(document.body).visibility === "visible"`), "換好字要把畫面顯示出來");
+      const missing = await p.ev(`[...I18N.missing]`);
+      assert(missing.length === 0, "字典缺：" + missing.join("｜"));
+      // 例外：切換鈕本來就寫「中文」；擴充包的議程名稱是使用者的內容；辨識引擎名稱由主機給（伺服器訊息另一張處理）
+      const left = (await p.ev(`document.body.innerText.match(/[\\u3400-\\u9fff][^\\n]{0,30}/g) || []`))
+        .filter((s) => !["中文", "測試擬訂議程", "沒有學生資料的議程"].includes(s) && !/^(雲端，最即時|本機)）$/.test(s));
+      assert(left.length === 0, "英文畫面還有中文：" + left.slice(0, 8).join("｜"));
+      // 例外：標了 translate="no" 的（切換鈕的說明本來就用中文、資料夾名稱）；心智圖與延伸元件（#mapView、#extView）的字在共用元件那一步（#194 切片 3）才翻
+      const attrs = await p.ev(`[...document.querySelectorAll("[title],[placeholder],[aria-label],[alt]")].filter((e) => !e.closest("[translate=no], #mapView, #extView")).flatMap((e) =>
+        ["title", "placeholder", "aria-label", "alt"].map((a) => e.getAttribute(a) || "")).filter((v) => /[\\u3400-\\u9fff]/.test(v))`);
+      assert(attrs.length === 0, "英文畫面的提示文字還有中文：" + attrs.slice(0, 8).join("｜"));
+      assert(await p.ev(`langBtn.textContent === "中文" && btn.textContent.includes("Start recording")`), "按鈕顯示要切過去的語言");
+      await setup(p);
+      await record(p, 1500);
+      await p.ev(`window.__stay = 1; langBtn.click(); true`);
+      await sleep(800);
+      assert(await p.ev(`window.__stay === 1 && !$("alert").hidden && /recording/i.test($("alertText").textContent)`), "錄音中按切換只提醒、不重新載入");
+      await stopRec(p);
+      await sleep(500);
+      assert(await p.ev(`$("status").textContent === _("已結束，可以下載逐字稿")`), "英文模式錄完，狀態不能被「連線已關閉」蓋掉：" + await p.ev(`$("status").textContent`));
+      await p.ev(`sumBusy = true; langBtn.click(); true`);
+      await sleep(800);
+      assert(await p.ev(`window.__stay === 1`), "AI 正在產生總結時也不能切");
+      await p.ev(`sumBusy = false; modBusy = { key: "x", label: "x" }; langBtn.click(); true`);
+      await sleep(800);
+      assert(await p.ev(`window.__stay === 1`), "延伸模組產生中也不能切（結果不會自己寫進暫存）");
+      await p.ev(`modBusy = null; true`);
+      await p.ev(`langBtn.click(); true`);
+      await p.until(`window.__stay === undefined && typeof UI_LANG !== "undefined" && !!document.getElementById("btn")`, 15000);
+      assert(await p.ev(`UI_LANG === "zh" && document.documentElement.lang === "zh-Hant" && localStorage.getItem("ms.lang") === "zh"`), "切回中文要記住");
+      assert(await p.ev(`btn.textContent.includes("開始錄音") && langBtn.textContent === "EN"`), "切回中文後畫面是中文");
+    }, { lang: "en-US" });
   },
 
   // 會議說明（#185）：設定面板寫的說明在開始時帶上、每段都附上；會議中用「會議說明」改，暫存記住、重新整理開回這場還在；

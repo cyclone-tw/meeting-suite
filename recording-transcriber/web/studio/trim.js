@@ -42,6 +42,7 @@ async function openTrim(videoPath) {
   $("#langSel").value = "zh";   // 每支影片預設中文；外語要自己選（#56）
   $("#langHint").hidden = true;
   trkShow(info.craig);   // 下載資料夾裡錄音時間對得上的 Discord 分軌（#129）
+  subShow(info.subtitles);   // 影片旁邊同名的字幕檔（#148）
   $("#tMeta").textContent = `${fmtLen(info.duration_ms)} · ${fmtSize(info.size)}${info.playable ? "" : " · 這種格式要先轉成瀏覽器能播的版本，第一次打開會慢一點"}`;
   // 已經做過字幕的影片：這裡只能看；要剪輯到專案的編輯頁剪（#5）
   $("#tExisting").hidden = !info.project;
@@ -96,7 +97,7 @@ function renderTrim() {
     ? `原片 ${fmtLen(dur)} → 剪完 <b>${fmtLen(kept)}</b><br><span class="muted">剪掉 ${trim.cuts.length} 段，共 ${fmtLen(removed)}；剪掉的部分不會送去辨識</span>`
     : `原片 <b>${fmtLen(dur)}</b><br><span class="muted">還沒剪。不剪也可以直接開始，之後在編輯頁也能剪。</span>`;
   $("#cutList").innerHTML = trim.cuts.map((x, i) => `<li><button class="t" data-pick="${i}">${ops.fmtTime(x.start)}–${ops.fmtTime(x.end)}</button><span class="why">${fmtLen(x.end - x.start)}${x.reason ? ` · ${esc(x.reason)}` : ""}</span><button class="btn sm ghost" data-unc="${i}">恢復</button></li>`).join("");
-  $("#costHint").textContent = kept > 0 ? `辨識約 NT$${Math.max(0.1, (kept / 3600000) * 3).toFixed(1)}（Soniox，每小時約 NT$3），${$("#langSel").value === "zh" ? "校對" : "翻譯"}走 Claude 訂閱。` : "整支都剪掉了，至少要留一段。";
+  $("#costHint").textContent = kept > 0 && home.sub.mode === "file" ? "用字幕檔：不送辨識、沒有辨識費；說明欄走 Claude 訂閱。" : kept > 0 ? `辨識約 NT$${Math.max(0.1, (kept / 3600000) * 3).toFixed(1)}（Soniox，每小時約 NT$3），${$("#langSel").value === "zh" ? "校對" : "翻譯"}走 Claude 訂閱。` : "整支都剪掉了，至少要留一段。";
   refreshStart();
 }
 

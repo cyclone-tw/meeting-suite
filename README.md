@@ -88,6 +88,8 @@ pnpm run studio:app           # 選用：做一個 ~/Applications/字幕工作�
 
 選影片 → 預覽剪頭尾 → 辨識與 AI 校對 → 編輯字幕、AI 剪輯建議、短影音 → 燒字幕或上傳 YouTube。只綁 127.0.0.1，每次啟動換一個 token。
 
+已經有字幕檔（SRT 或 VTT）的影片，在預覽頁「字幕從哪裡來」選「用已有的字幕檔」，就不用再辨識，也不收辨識費。影片旁邊有同名的字幕檔（`影片.srt`、`影片.zh_TW.srt`）會自動帶入。
+
 ### 上傳 YouTube（選用）
 
 字幕工作室可以直接把影片、字幕和說明欄上傳到你的頻道。Google 規定上傳要用 OAuth 授權，不能只填 API key；用的是你自己的 Google Cloud 專案，repo 裡沒有任何人的帳號。第一次設定約 15 分鐘，完整步驟見 [`recording-transcriber/docs/youtube-setup.md`](recording-transcriber/docs/youtube-setup.md)：

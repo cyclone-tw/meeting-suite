@@ -205,7 +205,7 @@ export function handoffFromStudio(p, { dir, icloud = icloudRoot(), inbox = iclou
     durationSec: (p.duration_ms || cues[cues.length - 1].end) / 1000,
     language: p.lang && p.lang !== "zh" ? p.lang : "unknown",   // 中文專案照舊
     // 外語影片（#56）：逐字稿是原文，中文譯文在專案資料夾的 subtitles.zh-TW.srt
-    engine: p.source?.captions === "author" ? "YouTube 作者字幕" : p.lang && p.lang !== "zh" ? "Soniox（原文，未校對）" : `Soniox＋${p.proofreader || "claude"} 校對`,
+    engine: p.source?.captions === "author" ? "YouTube 作者字幕" : p.source?.captions === "file" ? "使用者提供的字幕檔" : p.lang && p.lang !== "zh" ? "Soniox（原文，未校對）" : `Soniox＋${p.proofreader || "claude"} 校對`,
     producer: "字幕工作室",
     notes: [
       ...(p.cuts?.length ? ["有剪輯：這裡的時間都是原片時間，剪好的影片時間會不同"] : []),

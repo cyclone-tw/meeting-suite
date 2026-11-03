@@ -44,6 +44,7 @@ import { describe, nameFixes, suggestShorts } from "../lib/subtitle-ai.mjs";
 import { MAX_ITEMS as MAX_SHORTS, nextN, shortAss, shortCues, shortKeep, shortLayout, validateShorts } from "../lib/shorts.mjs";
 import { icloudRoot } from "../lib/paths.mjs";
 import { handoffEnabled, handoffFromStudio, handoffSubdir } from "../lib/wiki-handoff.mjs";
+import { nearbySubtitles, parseSubtitleText, readSubtitleFile } from "../lib/subtitle-file.mjs";
 import {
   CATEGORIES, CATEGORY_ORDER, SCOPE, SUBTITLE_MODES, addToPlaylist, authUrl, checkDefaults, exchangeCode, myChannel, myPlaylists, parseClient, pkce, refreshAccess, revoke, uploadCaption, uploadVideo, videoMeta,
 } from "../lib/youtube.mjs";
@@ -180,7 +181,7 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
   }
   const markDrivePending = (p) => { if (!d.driveDisabled()) p.drive = { ...(p.drive || {}), pending: new Date().toISOString() }; };
   const d = {
-    prepareSubtitles, burnSubtitles, preflight, syncCorrections, addCorrection, addCorrections, pickFile, reveal, ffprobeFps, remuxPreview, inCloudFolder,
+    prepareSubtitles, burnSubtitles, preflight, syncCorrections, addCorrection, addCorrections, pickFile, pickSubtitles, reveal, ffprobeFps, remuxPreview, inCloudFolder,
     thumbnails, waveform, poster, videoDurationMs, detectSilence, detectBlack, suggestFromTranscript, trash, describe,
     suggestShorts, renderShort, videoSize, writeBurnSubtitles, measureAdvances, nameFixes,
     // 外語影片與 YouTube 下載（#56）
@@ -442,12 +443,12 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       const asrCache = asrFile(dir);
       const legacy = path.join(dir, "asr-cache.json");   // #29 失敗時留下的
       if (fs.existsSync(legacy) && !fs.existsSync(asrCache)) fs.renameSync(legacy, asrCache);
-      // YouTube 作者上傳的字幕（#56）：直接用，不送辨識
+      // YouTube 作者上傳的字幕（#56）或使用者自己的字幕檔（#148）：直接用，不送辨識
       const captions = p.source?.captions_file ? path.join(dir, path.basename(p.source.captions_file)) : "";
       // Discord 分軌（#129）：先對齊；有人沒錄進影片就把他那一軌補進去，之後的辨識、預覽、燒字幕、上傳都用補好的
       const spk = p.tracks && !captions ? await prepareTracks(p, dir, work, job, ac.signal) : null;
       const r = captions && fs.existsSync(captions)
-        ? await d.prepareFromCaptions({ privacy: p.privacy, proofreader: p.proofreader, lang: p.lang }, { cues: parseVtt(fs.readFileSync(captions, "utf8")), onStep: (s) => { job.step = s; }, signal: ac.signal })
+        ? await d.prepareFromCaptions({ privacy: p.privacy, proofreader: p.proofreader, lang: p.lang }, { cues: captionCues(p, captions), onStep: (s) => { job.step = s; }, signal: ac.signal })
         : await d.prepareSubtitles({ video: p.video, privacy: p.privacy, engine: "soniox", proofreader: p.proofreader, terms: [], keep, durationMs: p.duration_ms, asrCache, lang: p.lang },
           { work, onStep: (s) => { job.step = s; }, signal: ac.signal });
       if (ac.signal.aborted) throw new Error("cancelled");   // 最後一步剛好做完才按停止：照樣算停止
@@ -1058,7 +1059,7 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
     const ext = path.extname(video).toLowerCase();
     const info = { id, video, name: path.basename(video, ext), size: fs.statSync(video).size, duration_ms: d.videoDurationMs(video), fps: d.ffprobeFps(video), playable: BROWSER_PLAYABLE.has(ext) };
     previews.set(id, info);
-    return { ...info, project, project_status: projectStatus, craig: project ? null : craigFor(video, info.duration_ms) };
+    return { ...info, project, project_status: projectStatus, craig: project ? null : craigFor(video, info.duration_ms), subtitles: project ? [] : nearbySubtitles(video) };
   }
 
   // 錄音時間對得上這支影片的 Craig zip（#129）；找不到或讀不了就當沒有
@@ -1167,7 +1168,11 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
     const dir = realDir(projectDirFor(video));
     const id = projectId(dir);
     const name = path.basename(video, path.extname(video));
+    // 使用者自己的字幕檔（#148）：先讀過一次，檔案不對就不建專案
+    const own = body.subtitles ? readSubtitleFile(body.subtitles) : null;
+    if (own && body.tracks) throw new Error("用字幕檔時不能同時用 Discord 分軌（分軌是替辨識出來的字幕標講者）");
     if (fs.existsSync(path.join(dir, "project.json"))) {
+      if (own) throw new Error("這支影片之前做過字幕；要改用字幕檔，先在首頁按「整理…」清掉這支的處理資料");
       const p = readProject(dir);
       // 這次改標成含個資（公開 → 非公開）：照這次的算；原本的校對者若可能走中國大陸雲端模型就改回 Claude
       const stricter = p.privacy === "public" && privacy !== "public";
@@ -1184,8 +1189,9 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
     const cuts = checkedCuts(body.cuts, duration);
     const tracks = checkedTracks(body.tracks);
     const base = { version: 1, video, name, privacy, proofreader, size: "medium", rev: 0, created: new Date().toISOString(), cues: [], description: "",
-      fps: d.ffprobeFps(video), duration_ms: duration, cuts, ...(lang !== "zh" ? { lang, lang_mode: "both" } : {}), ...(tracks ? { tracks } : {}) };
-    if (fs.existsSync(dir) && fs.statSync(dir).isDirectory() && fs.existsSync(path.join(dir, "subtitles.srt"))) {
+      fps: d.ffprobeFps(video), duration_ms: duration, cuts, ...(lang !== "zh" ? { lang, lang_mode: "both" } : {}), ...(tracks ? { tracks } : {}),
+      ...(own ? { source: { kind: "file", captions: "file", captions_file: `captions${own.ext}`, file_name: path.basename(own.file) } } : {}) };
+    if (!own && fs.existsSync(dir) && fs.statSync(dir).isDirectory() && fs.existsSync(path.join(dir, "subtitles.srt"))) {
       // pnpm run subtitle 做過的：直接讀它的 SRT 與說明欄，不重新辨識
       const desc = path.join(dir, "youtube-description.md");
       const p = { ...base, cuts: [], status: "ready", rev: 1, cues: validateCues(parseSrt(fs.readFileSync(path.join(dir, "subtitles.srt"), "utf8"))),
@@ -1196,10 +1202,12 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       return { id, imported: true };
     }
     if (fs.existsSync(dir) && (!fs.statSync(dir).isDirectory() || fs.readdirSync(dir).length)) throw new Error(`「${path.basename(dir)}」資料夾已經有別的檔案，請先移走`);
-    d.preflight({ privacy, proofreader, engine: "soniox", burn: false });
+    d.preflight({ privacy, proofreader, engine: own ? "none" : "soniox", burn: false });
     if (tracks) rememberNames(tracks.names, env);   // 下次同一群人自動帶入
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     fs.chmodSync(dir, 0o700);
+    // 字幕檔複製一份進專案：原檔之後搬走或改掉，重新處理還是用當初選的那份
+    if (own) writePrivate(path.join(dir, base.source.captions_file), own.raw);
     save(dir, { ...base, status: "processing" });
     projects.set(id, dir);
     rememberRecent({ dir, name }, env);
@@ -1328,6 +1336,11 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
     }
     if (req.method === "POST" && p === "/api/pick") {
       const picked = await d.pickFile();
+      return send(res, 200, picked ? { path: picked } : { cancelled: true });
+    }
+    // 使用者自己的字幕檔（#148）：macOS 選檔窗只挑 .srt／.vtt
+    if (req.method === "POST" && p === "/api/pick-subtitles") {
+      const picked = await d.pickSubtitles();
       return send(res, 200, picked ? { path: picked } : { cancelled: true });
     }
     // Discord 分軌（#129）：自己選 zip，回傳裡面有哪些帳號
@@ -1819,7 +1832,8 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       // 停止過的（#67）和失敗的一樣可以按「重新開始」
       const ok = action === "retry" ? ["failed", "cancelled"].includes(project.status) : ["ready", "failed", "cancelled"].includes(project.status);
       if (jobs.has(id) || !ok) return fail(res, 409, action === "retry" ? "現在不能重試" : "現在不能重新處理");
-      d.preflight({ privacy: project.privacy, proofreader: project.proofreader, engine: "soniox", burn: false });
+      // 用作者字幕或自己的字幕檔（#56、#148）的專案不辨識，不用 Soniox 金鑰
+      d.preflight({ privacy: project.privacy, proofreader: project.proofreader, engine: project.source?.captions_file ? "none" : "soniox", burn: false });
       project.status = "processing";
       project.error = "";
       delete project.stopped_at;
@@ -2039,10 +2053,28 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
   };
 }
 
+// 不用辨識的字幕：YouTube 作者字幕（#56）照原本的 VTT 讀法；使用者自己的字幕檔（#148）照 lib/subtitle-file.mjs 的規則
+function captionCues(p, file) {
+  const raw = fs.readFileSync(file, "utf8");
+  return p.source?.captions === "file" ? parseSubtitleText(raw, path.extname(file).toLowerCase()) : parseVtt(raw);
+}
+
 // macOS 原生選檔窗；按取消回傳空字串
 async function pickFile() {
   return new Promise((resolve) => {
     const script = ['activate', 'set f to choose file with prompt "選擇要上字幕的影片" of type {"public.movie"} default location (path to movies folder)', "POSIX path of f"];
+    const p = spawn("osascript", script.flatMap((s) => ["-e", s]), { stdio: ["ignore", "pipe", "ignore"] });
+    let out = "";
+    p.stdout.on("data", (x) => { out += x; });
+    p.on("error", () => resolve(""));
+    p.on("close", (code) => resolve(code === 0 ? out.trim() : ""));
+  });
+}
+
+// 使用者自己的字幕檔（#148）：of type 寫副檔名，SRT／VTT 在 macOS 沒有固定的 UTI
+async function pickSubtitles() {
+  return new Promise((resolve) => {
+    const script = ['activate', 'set f to choose file with prompt "選擇字幕檔（SRT 或 VTT）" of type {"srt", "vtt"} default location (path to movies folder)', "POSIX path of f"];
     const p = spawn("osascript", script.flatMap((s) => ["-e", s]), { stdio: ["ignore", "pipe", "ignore"] });
     let out = "";
     p.stdout.on("data", (x) => { out += x; });

@@ -5,11 +5,11 @@
 // 這個檔：首頁：選影片、最近專案、管理。
 
 // ---- 首頁 ----
-const home = { video: "", privacy: "public", proofreader: "claude", tools: null };
+const home = { video: "", privacy: "public", proofreader: "claude", tools: null, sub: { mode: "asr", file: "", found: [] } };
 
 function refreshStart() {
   const kept = trim.info ? cutOps.keptDuration(cutOps.keepSegments(trim.cuts, tDur())) : 0;
-  $("#startBtn").disabled = !(trim.info && !trim.info.project && kept > 0);
+  $("#startBtn").disabled = !(trim.info && !trim.info.project && kept > 0) || (home.sub.mode === "file" && !home.sub.file);
   const withPii = home.privacy !== "public";
   const blocked = (n) => withPii && (home.tools?.chinaCloudProofreaders || []).includes(n);
   if (blocked(home.proofreader)) home.proofreader = "claude";
@@ -133,7 +133,7 @@ $("#pickBtn").onclick = async () => {
     if (r.path) openTrim(r.path);
   } catch (e) { showAlert(e.message); } finally { $("#pickBtn").disabled = false; }
 };
-$("#langSel").onchange = () => { $("#langHint").hidden = $("#langSel").value === "zh"; if (trim.info) renderTrim(); };
+$("#langSel").onchange = () => { $("#langHint").hidden = home.sub.mode === "file" || $("#langSel").value === "zh"; if (trim.info) renderTrim(); };
 $("#privSeg").onclick = (e) => {
   const b = e.target.closest("button[data-v]");
   if (!b) return;
@@ -149,12 +149,45 @@ $("#proofSeg").onclick = (e) => {
 $("#startBtn").onclick = async () => {
   $("#startBtn").disabled = true;
   try {
-    const r = await post("/api/open", { video: trim.info.video, privacy: home.privacy, proofreader: home.proofreader, cuts: trim.cuts, lang: $("#langSel").value, tracks: trkPayload() });
+    const own = home.sub.mode === "file";
+    const r = await post("/api/open", { video: trim.info.video, privacy: home.privacy, proofreader: home.proofreader, cuts: trim.cuts, lang: $("#langSel").value,
+      ...(own ? { subtitles: home.sub.file } : { tracks: trkPayload() }) });
     if (r.reopened) toast("這支影片之前做過，直接打開上次的字幕。");
     if (r.imported) toast("找到之前用指令做好的字幕，直接打開來改。");
     leaveTrim();
     await openProject(r.id);
   } catch (e) { showAlert(e.message); refreshStart(); }
+};
+// 字幕從哪裡來（#148）：自動辨識，或用已經有的字幕檔；影片旁邊有同名的字幕檔就先帶入
+function subShow(found) {
+  home.sub = found?.length ? { mode: "file", file: found[0].path, found } : { mode: "asr", file: "", found: [] };
+  subRender();
+}
+function subRender() {
+  const own = home.sub.mode === "file", name = home.sub.file.split("/").pop();
+  for (const b of document.querySelectorAll("#subSeg button")) b.setAttribute("aria-pressed", String(b.dataset.v === home.sub.mode));
+  $("#subBox").hidden = !own;
+  $("#subFile").textContent = !home.sub.file ? "還沒選字幕檔。"
+    : `用「${name}」${home.sub.found.some((x) => x.path === home.sub.file) ? "（影片旁邊找到的同名字幕檔）" : ""}`;
+  // 分軌是替辨識出來的字幕標講者：用字幕檔時不顯示
+  $("#trkQ").hidden = own;
+  $("#trkBox").hidden = own;
+  $("#langHint").hidden = own || $("#langSel").value === "zh";   // 「會用 Soniox 辨識原文」只在自動辨識時對
+  if (trim.info) renderTrim(); else refreshStart();
+}
+$("#subSeg").onclick = (e) => {
+  const b = e.target.closest("button[data-v]");
+  if (!b) return;
+  home.sub.mode = b.dataset.v;
+  subRender();
+};
+$("#subPick").onclick = async () => {
+  $("#subPick").disabled = true;
+  try {
+    const r = await post("/api/pick-subtitles");
+    if (r.path) Object.assign(home.sub, { mode: "file", file: r.path });
+    subRender();
+  } catch (e) { showAlert(e.message); } finally { $("#subPick").disabled = false; }
 };
 $("#projList").onclick = (e) => {
   const o = e.target.closest("[data-open]"), m = e.target.closest("[data-manage]");

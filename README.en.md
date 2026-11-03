@@ -88,6 +88,8 @@ pnpm run studio:app           # optional: builds ~/Applications/字幕工作室.
 
 Pick a video → preview and trim → recognition and AI proofreading → edit subtitles, AI cut suggestions, shorts → burn subtitles or upload to YouTube. It only listens on 127.0.0.1 and uses a new token on every start.
 
+If a video already has a subtitle file (SRT or VTT), choose "Use an existing subtitle file" on the preview page: no recognition and no recognition cost. A subtitle file with the same name next to the video (`video.srt`, `video.zh_TW.srt`) is picked up automatically.
+
 ### Upload to YouTube (optional)
 
 The Subtitle Studio can upload the video, subtitles and description to your channel. Google requires OAuth for uploads; an API key alone is not enough. You use your own Google Cloud project; the repo contains nobody's account. First-time setup takes about 15 minutes; full steps (in Chinese) are in [`recording-transcriber/docs/youtube-setup.md`](recording-transcriber/docs/youtube-setup.md):

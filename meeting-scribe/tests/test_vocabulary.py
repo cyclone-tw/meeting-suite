@@ -159,6 +159,19 @@ class LoadTest(unittest.TestCase):
         self.addCleanup(s2.close)
         self.assertIn(("上周", "上週"), s2.fixed, "讀不到正本就照舊用 glossary.md")
 
+    def test_speaker_labels_never_become_corrections(self):
+        # #198：「講者 1 → 某人」只對那一場有意義；存進對照會把之後每一場的講者一都改成同一個人
+        bad = [["講者 1", "小美"], ["講者2", "阿明"], ["講者一", "小美"], ["說話者 3", "小華"], ["Speaker 4", "Amy"], [" 講者５", "小華"]]
+        path = self.tmp / "c.json"
+        path.write_text(json.dumps({"hints": bad + [["思語", "詩妤"]], "fixed": [["講者 1", "小美"], ["下周", "下週"]]}, ensure_ascii=False), encoding="utf-8")
+        store = server.CorrectionStore(path)
+        self.assertEqual(store.load(), {"hints": [["思語", "詩妤"]], "fixed": [["下周", "下週"]]}, "舊檔裡的講者對應讀進來就略過")
+        saved = store.save({"hints": bad + [["講者會議", "講座會議"]], "fixed": []})
+        self.assertEqual(saved["hints"], [["講者會議", "講座會議"]], "存檔時丟掉講者對應；「講者」後面不是編號的照留")
+        self.assertNotIn("小美", path.read_text(encoding="utf-8"))
+        v = server.parse_shared_vocabulary(NOTE + "\n- 講者 1 → 小美\n")
+        self.assertFalse(any(w.startswith("講者") for w, *_ in v["hints"] + v["fixed"]), "共用正本裡的講者對應也不用")
+
     def test_corrections_endpoint_reports_pending(self):
         store = server.CorrectionStore(self.tmp / "c.json")
         store.save({"hints": [["思妤", "詩妤"], ["詩語", "詩妤"], ["學長", "學弟"]], "fixed": [["下周", "下週"], ["Quad Code", "Claude Code"], ["Cloud Code", "Claude"]]})

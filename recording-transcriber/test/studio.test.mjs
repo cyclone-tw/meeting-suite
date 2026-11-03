@@ -3285,3 +3285,74 @@ test("Discord tracks added after processing: labels now, and reprocessing fills 
   assert.deepEqual(p3.speakers.missing, []);
   assert.deepEqual(p3.cues.map((c) => c.text), ["【A】今天我們來談", "【B】Claude Code", "【A】怎麼用"]);
 });
+
+// 用已經有的字幕檔（#148）：不送辨識、不做 AI 校對，走作者字幕的路（中文只轉台灣用語與標點，再寫說明欄）
+test("start from an existing SRT/VTT: nearby files suggested, no recognition, bad files refused", async (t) => {
+  const seen = { captions: [], preflight: [] };
+  const s = await startStudio(t, { deps: {
+    preflight(o) { seen.preflight.push(o); },
+    async prepareFromCaptions(o, { cues: c, onStep }) {
+      seen.captions.push({ o, cues: c });
+      onStep("describe");
+      return { cues: c, description: "我的簡介", chapters: [], applied: [], rejected: [], timing: null, report: { steps: {} } };
+    },
+    async pickSubtitles() { return path.join(s.dir, "picked.vtt"); },
+  } });
+  const srt = "\uFEFF1\r\n00:00:00,000 --> 00:00:01,500\r\n<i>大家好</i>\r\n\r\n2\r\n00:00:01,500 --> 00:00:03,000\r\n今天介紹 {\\an8}<font color=\"#fff\">字幕工作室</font>\r\n\r\n3\r\n00:00:03,000 --> 00:00:04,000\r\n當 x < 5 時輸入 <command>\r\n";
+  fs.writeFileSync(path.join(s.dir, "v.srt"), srt);
+  fs.writeFileSync(path.join(s.dir, "v.zh_TW.srt"), srt);
+  fs.writeFileSync(path.join(s.dir, "other.srt"), srt);
+  fs.writeFileSync(path.join(s.dir, "v.en.vtt"), "WEBVTT\n");
+  const pv = (await s.req("POST", "/api/preview", { body: { video: s.video } })).json;
+  assert.deepEqual(pv.subtitles.map((x) => x.name), ["v.srt", "v.zh_TW.srt", "v.en.vtt"], "只列同名的字幕檔；沒標語言的先、中文其次、其他語言最後");
+  assert.equal(pv.subtitles[0].path, path.join(fs.realpathSync(s.dir), "v.srt"));
+
+  const bad = async (body, re, why) => {
+    const r = await s.req("POST", "/api/open", { body: { video: s.video, privacy: "public", ...body } });
+    assert.equal(r.status, 400, why);
+    assert.match(r.json.error, re, why);
+  };
+  fs.writeFileSync(path.join(s.dir, "notes.txt"), srt);
+  await bad({ subtitles: path.join(s.dir, "notes.txt") }, /SRT|VTT/, "只收 .srt／.vtt");
+  await bad({ subtitles: path.join(s.dir, "nope.srt") }, /找不到/, "檔案不存在");
+  fs.writeFileSync(path.join(s.dir, "empty.srt"), "1\nnot a cue\n");
+  await bad({ subtitles: path.join(s.dir, "empty.srt") }, /讀不到/, "沒有任何一句");
+  fs.writeFileSync(path.join(s.dir, "big.srt"), "x".repeat(2 * 1024 * 1024 + 1));
+  await bad({ subtitles: path.join(s.dir, "big.srt") }, /2 MB/, "太大");
+  fs.writeFileSync(path.join(s.dir, "big5.srt"), Buffer.concat([Buffer.from("1\n00:00:00,000 --> 00:00:01,000\n"), Buffer.from([0xa4, 0xa4, 0xa4, 0xe5]), Buffer.from("\n")]));
+  await bad({ subtitles: path.join(s.dir, "big5.srt") }, /UTF-8/, "Big5 讀成亂碼就說清楚");
+  await bad({ subtitles: path.join(s.dir, "v.srt"), tracks: { zip: "/x.zip", names: {} } }, /分軌/, "字幕檔和 Discord 分軌不能一起用");
+  assert.equal(s.calls.prepare, 0);
+
+  const open = await s.req("POST", "/api/open", { body: { video: s.video, privacy: "public", subtitles: path.join(s.dir, "v.zh_TW.srt") } });
+  assert.equal(open.status, 200, open.raw);
+  const p = await s.waitFor(open.json.id, (x) => x.status === "ready");
+  assert.equal(s.calls.prepare, 0, "不送辨識");
+  assert.equal(seen.preflight.at(-1).engine, "none", "不需要 Soniox 金鑰");
+  assert.deepEqual(seen.captions[0].cues.map((c) => c.text), ["大家好", "今天介紹 字幕工作室", "當 x < 5 時輸入 <command>"], "字幕檔的格式標記拿掉，本來的角括號留著；BOM 與 CRLF 讀得懂");
+  assert.deepEqual(p.cues.map((c) => [c.start, c.end]), [[0, 1500], [1500, 3000], [3000, 4000]]);
+  assert.equal(p.source.captions, "file");
+  assert.equal(p.source.file_name, "v.zh_TW.srt");
+  const folder = projectDirFor(fs.realpathSync(s.video));
+  assert.equal(fs.readFileSync(path.join(folder, p.source.captions_file), "utf8"), srt.replace(/^\uFEFF/, ""), "字幕檔複製一份進專案");
+  // 原檔搬走了，重新處理照樣用專案裡那份
+  fs.rmSync(path.join(s.dir, "v.zh_TW.srt"));
+  assert.equal((await s.req("POST", `/api/projects/${open.json.id}/reprocess`, { body: {} })).status, 200);
+  const again = await s.waitFor(open.json.id, (x) => x.status === "ready" && seen.captions.length === 2);
+  assert.deepEqual(again.cues.map((c) => c.text), ["大家好", "今天介紹 字幕工作室", "當 x < 5 時輸入 <command>"], "重新處理讀專案裡的副本");
+  assert.equal(s.calls.prepare, 0, "重新處理也不送辨識");
+  assert.equal(seen.preflight.at(-1).engine, "none", "重新處理也不需要 Soniox 金鑰");
+  assert.equal(fs.readFileSync(path.join(folder, "youtube-description.md"), "utf8"), "我的簡介");
+
+  await bad({ subtitles: path.join(s.dir, "v.srt") }, /整理/, "做過字幕的影片不換字幕來源");
+
+  // VTT 也可以；選檔窗只挑字幕檔
+  const v2 = path.join(s.dir, "w.mp4");
+  fs.writeFileSync(v2, Buffer.from("0123456789abcdef"));
+  fs.writeFileSync(path.join(s.dir, "picked.vtt"), "WEBVTT\n\n00:00.000 --> 00:02.000\nHello\n");
+  const picked = (await s.req("POST", "/api/pick-subtitles")).json;
+  assert.equal(picked.path, path.join(s.dir, "picked.vtt"));
+  const o2 = await s.req("POST", "/api/open", { body: { video: v2, privacy: "public", subtitles: picked.path } });
+  const p2 = await s.waitFor(o2.json.id, (x) => x.status === "ready");
+  assert.deepEqual(p2.cues.map((c) => c.text), ["Hello"]);
+});
