@@ -75,3 +75,32 @@ test("translate: text nodes and attributes, keeps surrounding spaces, textarea o
   assert.equal(unknown.nodeValue, "沒有翻譯");
   assert.ok(en.missing.has("沒有翻譯"));
 });
+
+test("use/t: shared components follow the page's translator, Chinese when none is registered (#201)", () => {
+  const I = load();
+  assert.equal(I.t("共 {n} 段", { n: 3 }), "共 3 段", "沒登記：照中文、照樣代入");
+  assert.equal(I.t("複製"), "複製");
+  const en = I.create("en", [{ "複製": "Copy", "共 {n} 段": ["{n} paragraph", "{n} paragraphs"] }]);
+  I.use(en);
+  assert.equal(I.t("複製"), "Copy");
+  assert.equal(I.t("共 {n} 段", { n: 1 }), "1 paragraph");
+  I.t("沒在字典");
+  assert.ok(en.missing.has("沒在字典"), "共用元件查不到的字也記在頁面的 missing");
+  I.use(null);
+  assert.equal(I.t("複製"), "複製");
+});
+
+test("msg: server messages already filled in are matched back to {name} keys (#152)", () => {
+  const I = load();
+  const en = I.create("en", [{ "連不到主機": "Can't reach the host", "匯入失敗（{err}）": "Import failed ({err})", "{name}：{error}": "{name}: {error}",
+    "檔案路徑不合法：{path}": "Invalid file path: {path}", "共 {n} 段": ["{n} paragraph", "{n} paragraphs"], "a.b（{x}）": "dot {x}" }]);
+  assert.equal(en.msg("連不到主機"), "Can't reach the host");
+  assert.equal(en.msg("匯入失敗（TimeoutError）"), "Import failed (TimeoutError)");
+  assert.equal(en.msg("pack.json：檔案路徑不合法：x：y"), "pack.json: Invalid file path: x：y", "比較具體的先比，裡面的訊息一起翻");
+  assert.equal(en.msg("共 1 段"), "1 paragraph");
+  assert.equal(en.msg("共 2 段"), "2 paragraphs");
+  assert.equal(en.msg("aXb（1）"), "aXb（1）", "鍵裡的 . 是字面，不是正規式");
+  assert.equal(en.msg("沒在字典"), "沒在字典");
+  assert.equal(en.missing.size, 0, "msg 查不到不算缺字");
+  assert.equal(I.create("zh", [{ "連不到主機": "x" }]).msg("連不到主機"), "連不到主機", "中文模式照原樣");
+});

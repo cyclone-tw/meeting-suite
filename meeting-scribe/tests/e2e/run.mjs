@@ -685,15 +685,24 @@ const SCENARIOS = {
       assert(await p.ev(`!document.documentElement.classList.contains("i18n-wait") && getComputedStyle(document.body).visibility === "visible"`), "換好字要把畫面顯示出來");
       const missing = await p.ev(`[...I18N.missing]`);
       assert(missing.length === 0, "字典缺：" + missing.join("｜"));
-      // 例外：切換鈕本來就寫「中文」；擴充包的議程名稱是使用者的內容；辨識引擎名稱由主機給（伺服器訊息另一張處理）
+      // 例外：切換鈕本來就寫「中文」；擴充包的議程名稱是使用者的內容。辨識引擎名稱由主機照 lang=en 給英文（#197）
       const left = (await p.ev(`document.body.innerText.match(/[\\u3400-\\u9fff][^\\n]{0,30}/g) || []`))
-        .filter((s) => !["中文", "測試擬訂議程", "沒有學生資料的議程"].includes(s) && !/^(雲端，最即時|本機)）$/.test(s));
+        .filter((s) => !["中文", "測試擬訂議程", "沒有學生資料的議程"].includes(s));
       assert(left.length === 0, "英文畫面還有中文：" + left.slice(0, 8).join("｜"));
-      // 例外：標了 translate="no" 的（切換鈕的說明本來就用中文、資料夾名稱）；心智圖與延伸元件（#mapView、#extView）的字在共用元件那一步（#194 切片 3）才翻
-      const attrs = await p.ev(`[...document.querySelectorAll("[title],[placeholder],[aria-label],[alt]")].filter((e) => !e.closest("[translate=no], #mapView, #extView")).flatMap((e) =>
+      // 例外：標了 translate="no" 的（切換鈕的說明本來就用中文、資料夾名稱）。心智圖與延伸元件另外在 ui-lang-shared 看
+      const attrs = await p.ev(`[...document.querySelectorAll("[title],[placeholder],[aria-label],[alt]")].filter((e) => !e.closest("[translate=no]")).flatMap((e) =>
         ["title", "placeholder", "aria-label", "alt"].map((a) => e.getAttribute(a) || "")).filter((v) => /[\\u3400-\\u9fff]/.test(v))`);
       assert(attrs.length === 0, "英文畫面的提示文字還有中文：" + attrs.slice(0, 8).join("｜"));
       assert(await p.ev(`langBtn.textContent === "中文" && btn.textContent.includes("Start recording")`), "按鈕顯示要切過去的語言");
+      // 會議紀錄的模板名稱照翻好的模板清單顯示，存的資料不換（#197）
+      await p.until(`$("minTpl").options.length > 0 && !/[\\u3400-\\u9fff]/.test($("minTpl").options[0].textContent)`, 5000);
+      const note = await p.ev(`(() => { minutes = { template: "general", title: "一般會議", date: "2026-11-03", actions: [], decisions: [], questions: [], sections: [] };
+        try { renderMinutes(); return $("minNote").textContent; } finally { minutes = null; } })()`);
+      assert(note.startsWith(await p.ev(`$("minTpl").options[0].textContent`)) && !/[\u3400-\u9fff]/.test(note), "會議紀錄說明行的模板名稱要照清單：" + note);
+      assert(await p.ev(`minTplName({ template: "x", title: "擴充包的" }) === "擴充包的"`), "清單裡沒有的模板用存的名稱");
+      // 主機回的錯誤也是英文（#197）：api() 帶 lang=en
+      const err = await p.ev(`fetch(api("/api/drafts/get?draft=..%2Fx")).then((r) => r.json()).then((j) => j.error)`);
+      assert(err && !/[\u3400-\u9fff]/.test(err), "英文模式下主機的錯誤訊息要是英文：" + err);
       await setup(p);
       await record(p, 1500);
       await p.ev(`window.__stay = 1; langBtn.click(); true`);
@@ -714,6 +723,79 @@ const SCENARIOS = {
       assert(await p.ev(`UI_LANG === "zh" && document.documentElement.lang === "zh-Hant" && localStorage.getItem("ms.lang") === "zh"`), "切回中文要記住");
       assert(await p.ev(`btn.textContent.includes("開始錄音") && langBtn.textContent === "EN"`), "切回中文後畫面是中文");
     }, { lang: "en-US" });
+  },
+
+  // 共用元件跟著介面語言（#201）：英文模式下延伸頁籤與心智圖的按鈕、說明、提示都是英文；
+  // 會議內容（心智圖節點、AI 產出）與擴充包的模組名稱不翻
+  async "ui-lang-shared"() {
+    await withEnv(async ({ page: p }) => {
+      const cjk = (sel) => p.ev(`(() => { const r = /[\\u3400-\\u9fff]/; const out = [];
+        for (const e of document.querySelectorAll(${JSON.stringify(sel)})) {
+          if (r.test(e.innerText || "")) out.push((e.innerText || "").slice(0, 40));
+          for (const a of ["title", "aria-label", "placeholder"]) if (r.test(e.getAttribute(a) || "")) out.push(a + "=" + e.getAttribute(a)); }
+        return out; })()`);
+      await setup(p, { ai: true });
+      await record(p, 12000);
+      await stopRec(p);
+      await p.until("!!summary", 30000);
+      await p.ev(`setSide(true); document.getElementById("tab-ext").click(); true`);
+      await p.until(`document.querySelectorAll("#extView .ext-tab").length >= 2`, 10000);
+      const tabs = await p.ev(`[...document.querySelectorAll("#extView .ext-tab")].map((b) => b.textContent)`);
+      assert(tabs.includes("Build on") && tabs.includes("Perspective feedback"), "內建模組的子頁籤是英文：" + tabs.join("｜"));
+      await p.ev(`document.querySelector('#extView .ext-tab[data-mod="perspective"]').click(); true`);
+      const ext = (await cjk("#extView .ext-note, #extView .ext-opt, #extView .ext-actions, #extView .ext-actions *, #extView .ext-tabs"))
+        .filter((s) => !s.includes("測試模組"));
+      assert(ext.length === 0, "延伸頁籤還有中文：" + ext.join("｜"));
+      await p.ev(`document.getElementById("tab-map").click(); mapGo.click(); true`);
+      await p.until("!!mindmap", 20000);
+      const map = await cjk("#mapView .mm-tools, #mapView .mm-tools *, #mapView .mm-bar, #mapView .mm-bar *, #mapView .mm-hint");
+      assert(map.length === 0, "心智圖工具列與提示還有中文：" + map.join("｜"));
+      // 節點文字是會議內容（中文照舊），節點與畫布的說明是英文
+      assert(await p.ev(`/^Mind map canvas/.test(document.querySelector("#mapView .mm-body").getAttribute("aria-label"))
+        && [...document.querySelectorAll("#mapView .mm-node")].every((g) => /click to (collapse|expand)\\)$/.test(g.getAttribute("aria-label")))`), "心智圖畫布與節點的說明要是英文");
+      await p.ev(`mapUI.part("edit-btn").click(); true`);
+      const edit = await p.ev(`[...document.querySelectorAll("#mapView .mm-edit button, #mapView .mm-edit input")]
+        .flatMap((e) => [e.textContent, e.title, e.getAttribute("aria-label") || "", e.placeholder || ""]).map((v) => v.replace(/"[^"]*"/g, "")).filter((v) => /[\\u3400-\\u9fff]/.test(v))`);   // 引號裡是節點文字（會議內容）
+      assert(edit.length === 0, "心智圖編輯器還有中文：" + edit.slice(0, 6).join("｜"));
+      const missing = await p.ev(`[...I18N.missing]`);
+      assert(missing.length === 0, "字典缺：" + missing.join("｜"));
+    }, { lang: "en-US" });
+  },
+
+  // AI 產出語言（#202）：設定預設跟介面；開始時決定這場的語言，段落與會後產出都帶上；會議中改設定不影響這場；
+  // 跟著暫存，重新打開沿用當時的語言
+  async "ai-lang"() {
+    await withEnv(async ({ page: p, port }) => {
+      await setup(p, { ai: true });
+      assert(await p.ev(`$("aiLang").value === "ui" && aiLangNow() === "zh"`), "預設跟介面（中文）");
+      await p.ev(`$("aiLang").value = "en"; $("aiLang").onchange(); true`);
+      assert(await p.ev(`localStorage.getItem("ms.aiLang") === "en"`), "設定要記住");
+      await p.ev(`window._sent = []; window._f0 = window.fetch;
+        window.fetch = (u, o) => { if (["/api/agent/para", "/api/agent/summary", "/api/agent/module"].some((x) => String(u).includes(x))) _sent.push(JSON.parse(o.body)); return _f0(u, o); }; true`);
+      await record(p, 1500);
+      await p.ev(`$("aiLang").value = "zh"; $("aiLang").onchange(); true`);   // 會議中改設定：這場不變
+      await p.ev(`finals.push({ text: "大家好，今天輪流分享。", start: 1000, brk: true }); updateSegs(); maybeSendChunk(true); true`);
+      await p.until(`_sent.length > 0`, 10000);
+      assert(await p.ev(`_sent[0].ai_lang === "en" && meetingAiLang === "en"`), "段落帶這場開始時決定的語言");
+      await stopRec(p);
+      await p.until("!!summary", 30000);
+      await p.ev(`setSide(true); document.getElementById("tab-map").click(); mapGo.click(); true`);
+      await p.until(`_sent.some((b) => b.kind === "mindmap")`, 10000);
+      assert(await p.ev(`_sent.filter((b) => b.kind === "mindmap" || b.paras && !b.kind).every((b) => b.ai_lang === "en")`), "會後產出也帶同一種語言");
+      const draft = await p.ev("draftId");
+      const meta = (await (await fetch(`http://127.0.0.1:${port}/api/drafts/get?draft=${draft}`)).json()).meta;
+      assert(meta.ai_lang === "en", "暫存記住這場的語言：" + JSON.stringify(meta));
+      // 存 Drive 的延伸檔用結果存的標題（產生時照這場的語言給），不用畫面上跟介面語言走的名稱（#204）
+      await p.until(`!!modCatalogs.en && !!modCatalogs.zh`, 5000);
+      assert(await p.ev(`(() => { const keep = modules; modules = [{ module: "perspective", key: "p", title: "視角回饋：家長", options: { who: "parent" }, markdown: "x" }];
+        try { return moduleFiles()[0].label === "Perspective feedback (Parent)" && modLabel(modules[0]) === "視角回饋（家長）"; } finally { modules = keep; } })()`),
+        "英文會議的延伸檔名用英文，畫面照中文介面：" + await p.ev(`(() => { const keep = modules; modules = [{ module: "perspective", options: { who: "parent" }, title: "t" }]; try { return moduleFiles()[0].label; } finally { modules = keep; } })()`));
+      await p.go();
+      await p.until(`document.querySelectorAll("#recentList li").length > 0`, 10000);
+      await p.ev(`[...document.querySelectorAll("#recentList .btn")].find((b) => b.textContent === "開啟").click(); true`);
+      await p.until("segs.length > 0", 10000);
+      assert(await p.ev(`meetingAiLang === "en" && aiLangNow() === "zh"`), "重新打開沿用這場的語言，不看現在的設定");
+    });
   },
 
   // 會議說明（#185）：設定面板寫的說明在開始時帶上、每段都附上；會議中用「會議說明」改，暫存記住、重新整理開回這場還在；

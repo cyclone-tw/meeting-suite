@@ -15,7 +15,7 @@ const mapResult = () => {
 const mmLib = () => (window.MindMap?.mount && /^1\./.test(String(window.MindMap.version || "")) ? window.MindMap : null);
 
 let mmHandle = null, mmShown = "", mmSaveTimer = 0, mmArmed = 0, mmPending = null, mmSaving = Promise.resolve();
-const mmFileName = () => `${state.p?.name || "會議"}-心智圖`;
+const mmFileName = () => `${state.p?.name || "會議"}-心智圖`;   // 不翻：下載的檔名
 
 // 把圖存回去：元件轉好的文字版與圖片一起送，伺服器寫檔、排 Drive。
 // 專案與哪一份在改的當下就記下來（換專案後才存也不會存錯地方）；一次只送一份，照順序
@@ -38,7 +38,7 @@ async function saveMapNow(map, { edited, id, key }) {
     renderDrive();
     pollDrive();
   } catch (e) {
-    if (state.id === id) showAlert(`心智圖沒有存起來：${e.message}`);
+    if (state.id === id) showAlert(_("心智圖沒有存起來：{err}", { err: e.message }));
   }
 }
 
@@ -80,21 +80,26 @@ function renderMindNote() {
   const on = Boolean(modBusyId) && modBusyId === state.id && modBusyOutput === "mindmap";
   const note = $("#mindNote");
   note.className = "hint";
-  if (on) note.textContent = "會議轉錄 App 正在整理心智圖，一兩分鐘就好。可以繼續改字幕。";
-  else if (modListError) { note.textContent = `連不到會議轉錄 App，心智圖暫時不能用：${modListError}`; note.className = "hint warn-text"; }
-  else if (!modList) note.textContent = "正在向會議轉錄 App 要功能清單…";
-  else if (!mod) note.textContent = "會議轉錄 App 還沒提供心智圖。";
-  else if (saved && !mmLib()) { note.textContent = "找不到會議轉錄 App 的心智圖元件（這台的 meeting-scribe 程式），畫不出圖；mindmap.md、.opml 還在資料夾裡。"; note.className = "hint warn-text"; }
-  else if (saved?.stale) { note.textContent = "產生心智圖之後字幕改過了。要讓它跟上，按「重新產生」。"; note.className = "hint warn-text"; }
-  else if (saved) note.textContent = `${fmtDate(Date.parse(saved.edited_at || saved.created))} ${saved.edited ? "改過，" : recapWhere(saved)}${saved.edited ? "" : "產生，"}存成資料夾裡的 mindmap.md、mindmap.opml${saved.extra_files?.includes("mindmap.svg") ? "、mindmap.svg" : ""}。按「編輯」可以直接改字、加減項目、調順序。`;
-  else note.textContent = "把整場整理成主題、議題、重點、細節，畫成心智圖。還沒產生。";
+  if (on) note.textContent = _("會議轉錄 App 正在整理心智圖，一兩分鐘就好。可以繼續改字幕。");
+  else if (modListError) { note.textContent = _("連不到會議轉錄 App，心智圖暫時不能用：{err}", { err: modListError }); note.className = "hint warn-text"; }
+  else if (!modList) note.textContent = _("正在向會議轉錄 App 要功能清單…");
+  else if (!mod) note.textContent = _("會議轉錄 App 還沒提供心智圖。");
+  else if (saved && !mmLib()) { note.textContent = _("找不到會議轉錄 App 的心智圖元件（這台的 meeting-scribe 程式），畫不出圖；mindmap.md、.opml 還在資料夾裡。"); note.className = "hint warn-text"; }
+  else if (saved?.stale) { note.textContent = _("產生心智圖之後字幕改過了。要讓它跟上，按「重新產生」。"); note.className = "hint warn-text"; }
+  else if (saved) {
+    const date = fmtDate(Date.parse(saved.edited_at || saved.created));
+    const files = ["mindmap.md", "mindmap.opml", ...(saved.extra_files?.includes("mindmap.svg") ? ["mindmap.svg"] : [])].join(_("、"));
+    note.textContent = saved.edited
+      ? _("{date} 改過，存成資料夾裡的 {files}。按「編輯」可以直接改字、加減項目、調順序。", { date, files })
+      : _("{date} {how}，存成資料夾裡的 {files}。按「編輯」可以直接改字、加減項目、調順序。", { date, how: recapHow(saved), files });
+  } else note.textContent = _("把整場整理成主題、議題、重點、細節，畫成心智圖。還沒產生。");
 }
 
 function renderMind(fit = false) {
   const mod = mapMod(), saved = mapResult();
   const on = Boolean(modBusyId) && modBusyId === state.id && modBusyOutput === "mindmap";
   $("#tabMind").dataset.busy = on ? "1" : "";
-  $("#mindMake").textContent = on ? "正在產生…（一兩分鐘）" : mmArmed && Date.now() - mmArmed < 5000 ? "確定蓋掉改過的？" : saved ? "重新產生" : "產生心智圖";
+  $("#mindMake").textContent = on ? _("正在產生…（一兩分鐘）") : mmArmed && Date.now() - mmArmed < 5000 ? _("確定蓋掉改過的？") : saved ? _("重新產生") : _("產生心智圖");
   $("#mindMake").disabled = !mod || Boolean(recapBusyId || modBusyId);
   $("#mindStop").hidden = !on;
   $("#mindReveal").hidden = !saved;

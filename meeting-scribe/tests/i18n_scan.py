@@ -14,6 +14,7 @@ KEEP = re.compile(r"(//|/\*).*不翻")
 REGEX_PREV = set("(,=:[!&|?{};+-*%<>~^")
 REGEX_WORDS = {"return", "typeof", "case", "do", "else", "in", "of", "void", "yield", "await", "delete", "throw"}
 SKIP_TAGS = ("script", "style", "textarea")
+VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
 
 
 def norm(s):
@@ -25,6 +26,7 @@ class _Page(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.stack, self.texts, self.attrs, self.scripts = [], [], [], []
         self._script = None
+        self.keep = []   # 標了 translate="no" 的元素 [標籤, 同名巢狀層數]：裡面的字 web/shared/i18n.js 也不換
 
     def _attrs(self, attrs):
         if dict(attrs).get("translate") == "no":
@@ -34,6 +36,10 @@ class _Page(HTMLParser):
                 self.attrs.append((self.getpos()[0], k, norm(v)))
 
     def handle_starttag(self, tag, attrs):
+        if self.keep and self.keep[-1][0] == tag:
+            self.keep[-1][1] += 1
+        elif dict(attrs).get("translate") == "no" and tag not in VOID_TAGS:
+            self.keep.append([tag, 1])
         if tag in SKIP_TAGS:
             self.stack.append(tag)
             if tag == "script" and not dict(attrs).get("src"):
@@ -45,6 +51,10 @@ class _Page(HTMLParser):
         self._attrs(attrs)
 
     def handle_endtag(self, tag):
+        if self.keep and self.keep[-1][0] == tag:
+            self.keep[-1][1] -= 1
+            if not self.keep[-1][1]:
+                self.keep.pop()
         if self.stack and self.stack[-1] == tag:
             self.stack.pop()
             if tag == "script" and self._script:
@@ -56,7 +66,7 @@ class _Page(HTMLParser):
             if self.stack[-1] == "script" and self._script:
                 self._script[1].append(data)
             return
-        if CJK.search(data):
+        if CJK.search(data) and not self.keep:
             self.texts.append((self.getpos()[0], norm(data)))
 
 
@@ -64,6 +74,9 @@ def parse_html(text):
     p = _Page()
     p.feed(text)
     p.close()
+    if p.keep:
+        # translate="no" 的元素沒有結尾標籤：後面的字都會被當成不翻、默默漏掉，直接報錯（#204）
+        raise ValueError(f'translate="no" 的 <{p.keep[-1][0]}> 沒有結尾標籤')
     return p
 
 
@@ -261,3 +274,65 @@ def _all_tokens(src, start=0, end=None):
             for p in template_parts(src, t[0])[1]:
                 if p[0] == "expr":
                     yield from _all_tokens(src, p[1], p[2])
+
+
+# ── 主機回給頁面的訊息（#197）──────────────────────────────────────────────────────────────
+# server.py 用 AST 找：dict 裡 error／errors 的值、raise 的訊息、_fail／_abort_import 的參數、xx["errors"].append(…)、
+# 以及 MESSAGE_FUNCS 這幾個函式 return 的字串；值是模組層常數名稱時也查過去。f-string 的 {…} 一律寫成 {}，
+# 跟字典鍵的 {名稱} 換成 {} 之後比對（名稱隨字典取，位置與字面要一樣，主機才反查得到）。
+import ast  # noqa: E402
+
+SERVER_KEYS = {"error", "errors"}
+SINK_CALLS = {"_fail", "_abort_import"}
+MESSAGE_FUNCS = {"ai_error", "_form_body"}
+SLOT = re.compile(r"\{(\w*)\}")
+
+
+def canon(s):
+    """{名稱} 換成 {}：字典鍵與 f-string 用同一個形狀比對。"""
+    return SLOT.sub("{}", s)
+
+
+def _texts(node, consts):
+    """node 底下的字串：一般字串、f-string（{…} 寫成 {}；f-string 裡的片段不另外算）、模組層字串常數的名稱。"""
+    if isinstance(node, ast.Constant):
+        return [(node.lineno, node.value)] if isinstance(node.value, str) else []
+    if isinstance(node, ast.JoinedStr):
+        text = "".join(v.value if isinstance(v, ast.Constant) else "{}" for v in node.values)
+        inner = [t for v in node.values if isinstance(v, ast.FormattedValue) for t in _texts(v.value, consts)]
+        return [(node.lineno, text)] + inner
+    if isinstance(node, ast.Name):
+        return [(node.lineno, consts[node.id])] if node.id in consts else []
+    return [t for child in ast.iter_child_nodes(node) for t in _texts(child, consts)]
+
+
+def server_messages(src):
+    """[(行號, 訊息樣板)]：主機會送到頁面、含中文或全形標點的訊息。"""
+    tree = ast.parse(src)
+    consts = {t.id: n.value.value for n in tree.body if isinstance(n, ast.Assign) and isinstance(n.value, ast.Constant)
+              and isinstance(n.value.value, str) for t in n.targets if isinstance(t, ast.Name)}
+    found = []
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Dict):
+            for k, v in zip(n.keys, n.values):
+                if isinstance(k, ast.Constant) and k.value in SERVER_KEYS:
+                    found += _texts(v, consts) if not isinstance(v, ast.Call) else []
+        elif isinstance(n, ast.Raise) and isinstance(n.exc, ast.Call) and n.exc.args:
+            found += _texts(n.exc.args[0], consts)
+        elif isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute):
+            if n.func.attr in SINK_CALLS:
+                for a in n.args:
+                    found += _texts(a, consts)
+            elif (n.func.attr == "append" and isinstance(n.func.value, ast.Subscript)
+                  and isinstance(n.func.value.slice, ast.Constant) and n.func.value.slice.value in SERVER_KEYS):
+                found += _texts(n.args[0], consts)
+        elif isinstance(n, ast.FunctionDef) and n.name in MESSAGE_FUNCS:
+            for r in ast.walk(n):
+                if isinstance(r, ast.Return) and r.value is not None:
+                    found += _texts(r.value, consts)
+    seen, out = set(), []
+    for ln, t in sorted(found):
+        if CJK.search(t) and t not in seen:
+            seen.add(t)
+            out.append((ln, t))
+    return out

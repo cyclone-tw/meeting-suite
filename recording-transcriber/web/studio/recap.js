@@ -20,7 +20,7 @@ function recapCuesNow() {
 const recapTranscriptText = () => recapCuesNow().map((c) => `[${recapHms(c.start)}] ${c.text.trim()}`).join("\n");
 function recapIntroText(r) {
   const ch = r.chapters || [];
-  return r.intro + (ch.length ? `\n\n[ 分段章節 ]\n${ch.map((c) => `${recapHms(c.t_ms)} ${c.title}`).join("\n")}` : "");
+  return r.intro + (ch.length ? `\n\n[ 分段章節 ]\n${ch.map((c) => `${recapHms(c.t_ms)} ${c.title}`).join("\n")}` : "");   // 不翻：複製出去的總結內容（資料）
 }
 function recapViewText(v) {
   const r = state.p?.recap;
@@ -38,7 +38,8 @@ function recapAllText() {
 }
 
 // 在哪裡產生的（#83）：先在這台，失敗才由主機產生
-const recapWhere = (r) => (r.via === "local" ? "在這台 Mac " : r.via === "app" ? `由主機${r.local_error ? `（這台沒成功：${r.local_error}）` : ""}` : "");
+const recapWhere = (r) => (r.via === "local" ? _("在這台 Mac 產生") : r.via === "app" ? (r.local_error ? _("由主機產生（這台沒成功：{err}）", { err: I18N.msg(r.local_error) }) : _("由主機產生")) : "");
+const recapHow = (r) => recapWhere(r) || _("產生");
 
 function renderRecap() {
   const r = state.p?.recap, on = Boolean(recapBusyId) && recapBusyId === state.id;
@@ -50,17 +51,17 @@ function renderRecap() {
   $("#recapRich").hidden = !rich;
   $("#recapText").value = on && recapView !== "transcript" ? "" : recapViewText(recapView);
   if (rich) window.MdView.render($("#recapRich"), recapViewText(recapView), { top: 3 });
-  $("#recapMake").textContent = on ? "正在產生…（一兩分鐘）" : r ? "重新產生" : "產生會後總結";
+  $("#recapMake").textContent = on ? _("正在產生…（一兩分鐘）") : r ? _("重新產生") : _("產生會後總結");
   $("#recapMake").disabled = Boolean(recapBusyId || modBusyId);   // 一次只跑一份
   $("#recapStop").hidden = !on;
   $("#recapCopyAll").disabled = !r;
   $("#recapReveal").hidden = !r;
   const note = $("#recapNote");
   note.className = "hint";
-  if (on) note.textContent = "會議轉錄 App 正在整理整場內容，一兩分鐘就好。可以繼續改字幕。";
-  else if (r?.stale) { note.textContent = "產生總結之後字幕改過了。要讓總結跟上，按「重新產生」。"; note.className = "hint warn-text"; }
-  else if (r) note.textContent = `${fmtDate(Date.parse(r.created))} ${recapWhere(r)}產生，也存成資料夾裡的 summary.md。`;
-  else note.textContent = "和會議轉錄 App 一樣的會後總結：簡介與分段章節、完整總結、短總結，再加上逐字稿。由會議轉錄 App 產生，約一兩分鐘。";
+  if (on) note.textContent = _("會議轉錄 App 正在整理整場內容，一兩分鐘就好。可以繼續改字幕。");
+  else if (r?.stale) { note.textContent = _("產生總結之後字幕改過了。要讓總結跟上，按「重新產生」。"); note.className = "hint warn-text"; }
+  else if (r) note.textContent = _("{date} {how}，也存成資料夾裡的 {file}。", { date: fmtDate(Date.parse(r.created)), how: recapHow(r), file: "summary.md" });
+  else note.textContent = _("和會議轉錄 App 一樣的會後總結：簡介與分段章節、完整總結、短總結，再加上逐字稿。由會議轉錄 App 產生，約一兩分鐘。");
 }
 
 // 存到 Drive（有設定 studio_drive 才存）：產生就自動存；沒存成功或舊的結果還沒存過，可以按「存到 Drive」。
@@ -70,17 +71,17 @@ const DRIVE_ROWS = ["recap", "mind", "ext"];
 function renderDrive() {
   const p = state.p || {}, d = p.drive, has = Boolean(p.recap) || Boolean((p.modules || []).length);
   const failed = !d?.pending && d?.error && (!d.saved || d.failed > d.saved);
-  const text = d?.pending ? "正在存到 Drive…（Drive 卡住時最多等 30 秒，不影響其他操作）"
-    : failed ? `沒有存到 Drive：${d.error}`
-    : d?.folder ? `已存到${d.where || "Drive"}／${d.folder}${d.files?.length ? `（${d.files.join("、")}）` : ""}`
-    : "還沒存到 Drive。";
+  const text = d?.pending ? _("正在存到 Drive…（Drive 卡住時最多等 30 秒，不影響其他操作）")
+    : failed ? _("沒有存到 Drive：{err}", { err: d.error })
+    : d?.folder ? (d.files?.length ? _("已存到{where}／{folder}（{files}）", { where: d.where || "Drive", folder: d.folder, files: d.files.join(_("、")) }) : _("已存到{where}／{folder}", { where: d.where || "Drive", folder: d.folder }))
+    : _("還沒存到 Drive。");
   for (const r of DRIVE_ROWS) {
     // 沒設定 Drive：不顯示這一行；以前存過的照樣顯示位置，但不給「存到 Drive」
     $(`#driveRow_${r}`).hidden = !d && !(has && FEATURES.has("drive"));
     $(`#driveOpen_${r}`).hidden = !d?.folder;
     $(`#driveRetry_${r}`).hidden = Boolean(d?.pending) || !FEATURES.has("drive") || !(has && (failed || !d?.folder));
     $(`#driveRetry_${r}`).disabled = driveBusy;
-    $(`#driveRetry_${r}`).textContent = driveBusy ? "存檔中…" : failed ? "再存一次" : "存到 Drive";
+    $(`#driveRetry_${r}`).textContent = driveBusy ? _("存檔中…") : failed ? _("再存一次") : _("存到 Drive");
     $(`#driveNote_${r}`).className = failed ? "hint warn-text" : "hint";
     $(`#driveNote_${r}`).textContent = text;
   }
@@ -110,7 +111,7 @@ async function saveDrive() {
   renderDrive();
   try {
     const r = await post(`/api/projects/${id}/drive`);
-    if (state.id === id) { state.p = { ...state.p, drive: r.drive }; toast("已存到 Drive。", [], 3000); }
+    if (state.id === id) { state.p = { ...state.p, drive: r.drive }; toast(_("已存到 Drive。"), [], 3000); }
   } catch (e) {
     if (state.id === id) showAlert(e.message);
     try { const p = await api(`/api/projects/${id}`); if (state.id === id) state.p = { ...state.p, drive: p.drive }; } catch { /* 下次再說 */ }
@@ -131,7 +132,7 @@ async function makeRecap() {
     state.p = { ...state.p, recap: r.recap, ...(r.drive !== undefined ? { drive: r.drive } : {}) };
     pollDrive();
     recapView = "intro";
-    toast(`會後總結好了${r.recap.chapters?.length ? `，共 ${r.recap.chapters.length} 章` : ""}。`, [], 5000);
+    toast(r.recap.chapters?.length ? _("會後總結好了，共 {n} 章。", { n: r.recap.chapters.length }) : _("會後總結好了。"), [], 5000);
   } catch (e) {
     if (state.id === id) showAlert(e.message);
   } finally {
@@ -148,8 +149,8 @@ async function checkSharedVersion() {
   sharedChecked = true;
   try {
     const v = await api("/api/shared-version");
-    if (v.local && v.remote && !v.same) toast(`工作室用的會議 App 元件（這台 ${esc(v.local.slice(0, 8))}）和線上的（${esc(v.remote.slice(0, 8))}）不一樣，畫面或存檔格式可能和 App 不同。請更新 MacBook 的 meeting-scribe 程式。`, [], 12000);
-    else if (!v.local) toast("找不到這台的會議 App 程式，總結、心智圖、延伸的畫面與存檔可能用不了。", [], 12000);
+    if (v.local && v.remote && !v.same) toast(_("工作室用的會議 App 元件（這台 {local}）和線上的（{remote}）不一樣，畫面或存檔格式可能和 App 不同。請更新 MacBook 的 meeting-scribe 程式。", { local: esc(v.local.slice(0, 8)), remote: esc(v.remote.slice(0, 8)) }), [], 12000);
+    else if (!v.local) toast(_("找不到這台的會議 App 程式，總結、心智圖、延伸的畫面與存檔可能用不了。"), [], 12000);
   } catch { /* 查不到就算了，下次重新整理再查 */ }
 }
 async function refreshRecap() {
@@ -169,10 +170,10 @@ $("#recapSeg").onclick = (e) => {
 $("#recapMake").onclick = () => makeRecap();
 $("#recapStop").onclick = async () => { try { await post(`/api/projects/${state.id}/cancel`); } catch (e) { showAlert(e.message); } };
 async function recapCopy(text, what) {
-  try { await navigator.clipboard.writeText(text); toast(`已複製${what}。`, [], 3000); } catch { $("#recapText").select(); }
+  try { await navigator.clipboard.writeText(text); toast(_("已複製{what}。", { what }), [], 3000); } catch { $("#recapText").select(); }
 }
-$("#recapCopy").onclick = () => recapCopy(recapViewText(recapView), "這一頁");   // 排版呈現時也複製原文
-$("#recapCopyAll").onclick = () => recapCopy(recapAllText(), "全部（簡介、完整總結、短總結、逐字稿）");
+$("#recapCopy").onclick = () => recapCopy(recapViewText(recapView), _("這一頁"));   // 排版呈現時也複製原文
+$("#recapCopyAll").onclick = () => recapCopy(recapAllText(), _("全部（簡介、完整總結、短總結、逐字稿）"));
 $("#recapReveal").onclick = async () => { try { await post(`/api/projects/${state.id}/reveal`, { what: "summary" }); } catch (e) { showAlert(e.message); } };
 $("#tabRecap").addEventListener("click", () => refreshRecap());
 
@@ -184,7 +185,7 @@ let modList = null, modListError = "", modBusyId = "", modBusyLabel = "", modBus
 const modKeyOf = (mod, options) => [mod.id, ...mod.options.map((o) => `${o.id}=${options[o.id]}`)].join(":");
 const modLabelOf = (mod, options) => {
   const picked = mod.options.map((o) => o.choices.find(([c]) => c === options[o.id])?.[1]).filter(Boolean);
-  return picked.length ? `${mod.title}（${picked.join("、")}）` : mod.title;
+  return picked.length ? _("{title}（{picked}）", { title: mod.title, picked: picked.join(_("、")) }) : mod.title;
 };
 let extPanel = null;
 function extMount() {
@@ -216,7 +217,7 @@ function renderModules() {
   $("#tabExt").dataset.busy = on && modBusyOutput !== "mindmap" ? "1" : "";
   const panel = extMount();
   if (!panel) {
-    $("#extHost").textContent = "找不到會議轉錄 App 的共用元件（這台的 meeting-scribe 程式），延伸暫時不能用。";
+    $("#extHost").textContent = _("找不到會議轉錄 App 的共用元件（這台的 meeting-scribe 程式），延伸暫時不能用。");
     return;
   }
   // 一次只跑一份：會後總結或別的模組在跑時，ExtPanel 的「產生」也不能按
@@ -224,10 +225,10 @@ function renderModules() {
   panel.update({
     modules: modList || [],
     loading: !modList && !modListError,
-    error: modListError ? `連不到會議轉錄 App：${modListError}` : "",
+    error: modListError ? _("連不到會議轉錄 App：{err}", { err: modListError }) : "",
     busy,
     results: (state.p?.modules || []).filter((x) => x.output !== "mindmap")
-      .map((x) => ({ ...x, meta: `${fmtDate(Date.parse(x.created))} ${recapWhere(x)}產生，也存成資料夾裡的 ${x.file}` })),
+      .map((x) => ({ ...x, meta: _("{date} {how}，也存成資料夾裡的 {file}。", { date: fmtDate(Date.parse(x.created)), how: recapHow(x), file: x.file }) })),
   });
 }
 
@@ -249,7 +250,7 @@ async function makeModule(mod, options) {
     state.p = { ...state.p, modules: [r.module, ...(state.p.modules || []).filter((x) => x.key !== r.module.key)], ...(r.drive !== undefined ? { drive: r.drive } : {}) };
     pollDrive();
     const where = recapWhere(r.module).trim();
-    toast(`「${esc(r.module.label)}」好了${where ? `（${esc(where)}產生）` : ""}，也存成資料夾裡的 ${esc(r.module.file)}。`, [], 5000);   // 名稱來自 App：toast 是 HTML，要跳脫
+    toast(where ? _("「{label}」好了（{how}），也存成資料夾裡的 {file}。", { label: esc(r.module.label), how: esc(where), file: esc(r.module.file) }) : _("「{label}」好了，也存成資料夾裡的 {file}。", { label: esc(r.module.label), file: esc(r.module.file) }), [], 5000);   // 名稱來自 App：toast 是 HTML，要跳脫
   } catch (e) {
     if (state.id === id) showAlert(e.message);
   } finally {

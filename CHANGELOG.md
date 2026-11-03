@@ -2,14 +2,25 @@
 
 版本規則：別人升級後要動手才能繼續用（設定、存檔格式、拿掉功能、最低版本）升大版號；新功能升小版號；修正與文件升修補號。0.x 期間大版號降為小版號。
 
-## v0.3.0（2026-11-03）
+## v0.4.0（2026-11-03）
 
 ### 新功能
 
-- start from an existing SRT/VTT subtitle file
-- zh/en UI language switch for the meeting app
+- zh/en UI switch
+- AI output language setting
+- shared components follow the UI language
+- server messages follow the UI language
 
 ### 修正
+
+- consistent English wording for lines and trims
+- i18n follow-ups from the #153 review
+- extension file names follow the meeting language; i18n nits
+
+## v0.3.0（2026-11-03）
+
+- start from an existing SRT/VTT subtitle file
+- zh/en UI language switch for the meeting app
 
 - speaker labels never become shared corrections
 

@@ -10,14 +10,14 @@ let trk = null;
 // 編輯頁「講者」面板用的分軌
 let spkCraig = null, spkBusy = false;
 
-const craigWhen = (ms) => (ms ? new Date(ms).toLocaleString("zh-TW", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }) : "");
-const craigSummary = (c) => `${c.file}（${craigWhen(c.start)} 開始錄、${c.tracks.length} 個人）`;
+const craigWhen = (ms) => (ms ? new Date(ms).toLocaleString(UI_LANG === "en" ? "en-US" : "zh-TW", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }) : "");
+const craigSummary = (c) => _("{file}（{when} 開始錄、{n} 個人）", { file: c.file, when: craigWhen(c.start), n: c.tracks.length });
 
 // 每個帳號一列，填字幕上要顯示的名字；記過的名字帶入。
 // 認得的人（名冊裡有名字）收成一行，按「修改名字」才展開；新帳號照樣列出來填（#132）
 function craigRows(tbody, craig, known) {
   const table = tbody.closest("table");
-  tbody.innerHTML = craig.tracks.map((t, i) => `<tr${t.name ? " data-known" : ""}><td>${esc(t.user)}</td><td><input class="text-in" data-i="${i}" maxlength="12" value="${esc(t.name || "")}" placeholder="${esc(t.user)}" aria-label="${esc(t.user)} 在字幕上的名字"></td></tr>`).join("");
+  tbody.innerHTML = craig.tracks.map((t, i) => `<tr${t.name ? " data-known" : ""}><td>${esc(t.user)}</td><td><input class="text-in" data-i="${i}" maxlength="12" value="${esc(t.name || "")}" placeholder="${esc(t.user)}" aria-label="${_("{user} 在字幕上的名字", { user: esc(t.user) })}"></td></tr>`).join("");
   const names = craig.tracks.filter((t) => t.name).map((t) => t.name);
   const fresh = craig.tracks.length - names.length;
   const expand = () => {
@@ -27,7 +27,7 @@ function craigRows(tbody, craig, known) {
   };
   if (!names.length) { known.hidden = true; table.hidden = false; return; }
   // 名字一律用同一種色塊；「修改名字」用另一個醒目的顏色，才不會被當成普通文字
-  known.innerHTML = `<span>認得 ${names.length} 位：</span>${names.map((n) => `<span class="spk-chip">${esc(n)}</span>`).join("")}${fresh ? `<span>新來的 ${fresh} 位請在下面填名字</span>` : ""}<button type="button" class="btn sm spk-edit">修改名字</button>`;
+  known.innerHTML = `<span>${_("認得 {n} 位：", { n: names.length })}</span>${names.map((n) => `<span class="spk-chip">${esc(n)}</span>`).join("")}${fresh ? `<span>${_("新來的 {n} 位請在下面填名字", { n: fresh })}</span>` : ""}<button type="button" class="btn sm spk-edit">${_("修改名字")}</button>`;
   known.querySelector("button").onclick = expand;
   known.hidden = false;
   for (const tr of tbody.querySelectorAll("tr[data-known]")) tr.hidden = true;
@@ -49,7 +49,7 @@ async function pickCraig() {
 // ── 開始處理前（設定畫面）──
 function trkShow(craig) {
   trk = craig || null;
-  $("#trkFound").textContent = trk ? `找到這場的 Discord 分軌：${craigSummary(trk)}` : "沒有找到這場的 Discord 分軌（Craig 下載的 zip）。用 Discord 錄音的話可以自己選。";
+  $("#trkFound").textContent = trk ? _("找到這場的 Discord 分軌：{summary}", { summary: craigSummary(trk) }) : _("沒有找到這場的 Discord 分軌（Craig 下載的 zip）。用 Discord 錄音的話可以自己選。");
   $("#trkBody").hidden = !trk;
   $("#trkClear").hidden = !trk;
   if (trk) craigRows($("#trkRows"), trk, $("#trkKnown"));
@@ -73,14 +73,14 @@ $("#spkOpen").onclick = () => spkShow($("#spkBox").hidden);
 function spkReset(p) {
   spkCraig = null;
   $("#spkNote").textContent = "";
-  const err = p?.tracks?.error && !p?.speakers ? `處理時沒有標講者：${p.tracks.error}` : "";
+  const err = p?.tracks?.error && !p?.speakers ? _("處理時沒有標講者：{err}", { err: I18N.msg(p.tracks.error) }) : "";
   spkShow(Boolean(err));
   if (err) $("#spkNote").textContent = err;
 }
 
 async function spkLoad() {
   const id = state.id;
-  $("#spkFound").textContent = "找這場的分軌…";
+  $("#spkFound").textContent = _("找這場的分軌…");
   $("#spkApply").disabled = true;
   try {
     const r = await api(`/api/projects/${id}/speakers`);
@@ -91,11 +91,11 @@ async function spkLoad() {
 function spkSet(c) {
   spkCraig = c || null;
   const done = Boolean(state.p?.speakers);
-  $("#spkFound").textContent = spkCraig ? `分軌：${craigSummary(spkCraig)}${done ? "。改了名字就按「重新標講者」" : ""}` : "沒有找到這場的 Discord 分軌，請按「選 zip…」。";
+  $("#spkFound").textContent = spkCraig ? (done ? _("分軌：{summary}。改了名字就按「重新標講者」", { summary: craigSummary(spkCraig) }) : _("分軌：{summary}", { summary: craigSummary(spkCraig) })) : _("沒有找到這場的 Discord 分軌，請按「選 zip…」。");
   $("#spkTable").hidden = !spkCraig;
   $("#spkKnown").hidden = true;
   if (spkCraig) craigRows($("#spkRows"), spkCraig, $("#spkKnown"));
-  $("#spkApply").textContent = done ? "重新標講者" : "標上講者";
+  $("#spkApply").textContent = done ? _("重新標講者") : _("標上講者");
   $("#spkApply").disabled = !spkCraig || spkBusy;
 }
 $("#spkPick").onclick = async () => {
@@ -108,16 +108,18 @@ $("#spkApply").onclick = async () => {
   await flushSave();   // 伺服器標的是存好的字幕：先把剛改的存進去
   spkBusy = true;
   $("#spkApply").disabled = true;
-  $("#spkNote").textContent = "對齊分軌、判斷每句是誰講的…（大約十幾秒）";
+  $("#spkNote").textContent = _("對齊分軌、判斷每句是誰講的…（大約十幾秒）");
   try {
     const r = await post(`/api/projects/${id}/speakers`, { zip: craig.zip, names, rev: state.p.rev });
     if (state.id !== id) return;
-    const counts = Object.entries(r.counts).filter(([, n]) => n).map(([k, n]) => `${k} ${n} 句`).join("、");
-    const missing = r.missing.length ? `。注意：影片裡沒錄到 ${r.missing.join("、")} 的聲音，他們講的話不在字幕裡；按下面的「重新處理這支影片…」會先把聲音補回去再重新辨識（要再付一次辨識費）` : "";
+    const counts = Object.entries(r.counts).filter(([, n]) => n).map(([k, n]) => _("{name} {n} 句", { name: k, n })).join(_("、"));
     await openProject(id);   // 重新載入字幕（rev 也換新）
     if (state.id !== id) return;
     spkShow(true);
-    $("#spkNote").textContent = `標好了：${counts || "沒有判斷出講者"}${missing}`;
+    const shown = counts || _("沒有判斷出講者");
+    $("#spkNote").textContent = r.missing.length
+      ? _("標好了：{counts}。注意：影片裡沒錄到 {names} 的聲音，他們講的話不在字幕裡；按下面的「重新處理這支影片…」會先把聲音補回去再重新辨識（要再付一次辨識費）", { counts: shown, names: r.missing.join(_("、")) })
+      : _("標好了：{counts}", { counts: shown });
   } catch (e) {
     if (state.id === id) $("#spkNote").textContent = e.message;
   } finally {
@@ -132,9 +134,9 @@ function rosterRender(people) {
   $("#rosterTable").hidden = !people.length;
   $("#rosterEmpty").hidden = people.length > 0;
   $("#rosterRows").innerHTML = people.map((x) => `<tr data-user="${esc(x.user)}"><td>${esc(x.user)}</td>
-    <td><input class="text-in" maxlength="12" value="${esc(x.name)}" placeholder="${x.name ? "" : "還沒取名"}" aria-label="${esc(x.user)} 在字幕上的名字"></td>
+    <td><input class="text-in" maxlength="12" value="${esc(x.name)}" placeholder="${x.name ? "" : _("還沒取名")}" aria-label="${_("{user} 在字幕上的名字", { user: esc(x.user) })}"></td>
     <td>${x.seen ? esc(x.seen.slice(5).replace("-", "/")) : "—"}</td>
-    <td><button type="button" class="btn sm ghost" data-act="remove">刪除</button></td></tr>`).join("");
+    <td><button type="button" class="btn sm ghost" data-act="remove">${_("刪除")}</button></td></tr>`).join("");
   for (const tr of $("#rosterRows").querySelectorAll("tr")) {
     const user = tr.dataset.user, inp = tr.querySelector("input");
     let was = inp.value;
@@ -143,13 +145,13 @@ function rosterRender(people) {
       try {
         const name = (await post("/api/speakers", { user, name: inp.value })).people.find((x) => x.user === user)?.name || "";
         inp.value = was = name;
-        $("#rosterNote").textContent = `${user} 改成「${name}」了。下次標講者就會用新名字。`;
+        $("#rosterNote").textContent = _("{user} 改成「{name}」了。下次標講者就會用新名字。", { user, name });
       } catch (e) { inp.value = was; $("#rosterNote").textContent = e.message; }
     };
     const del = tr.querySelector('[data-act="remove"]');
     del.onclick = () => {
-      if (!del.dataset.sure) { del.dataset.sure = "1"; del.textContent = "確定刪除？"; return; }
-      rosterCall("/api/speakers/remove", { user }, `已經把 ${user} 從名冊刪掉。`);
+      if (!del.dataset.sure) { del.dataset.sure = "1"; del.textContent = _("確定刪除？"); return; }
+      rosterCall("/api/speakers/remove", { user }, _("已經把 {user} 從名冊刪掉。", { user }));
     };
   }
 }
@@ -170,6 +172,6 @@ async function rosterLoad() {
 $("#settingsBtn").addEventListener("click", rosterLoad);
 $("#rosterAdd").onclick = async () => {
   const user = $("#rosterUser").value.trim(), name = $("#rosterName").value;
-  if (await rosterCall("/api/speakers", { user, name }, `已經把 ${user} 加進名冊。`)) { $("#rosterUser").value = ""; $("#rosterName").value = ""; }
+  if (await rosterCall("/api/speakers", { user, name }, _("已經把 {user} 加進名冊。", { user }))) { $("#rosterUser").value = ""; $("#rosterName").value = ""; }
 };
 for (const id of ["#rosterUser", "#rosterName"]) $(id).addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) $("#rosterAdd").click(); });

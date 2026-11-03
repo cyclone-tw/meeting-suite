@@ -78,12 +78,16 @@ const PAGE_CSP = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-s
 const PAGE_ASSETS = new Map([
   ["/studio.css", "text/css; charset=utf-8"],
   ["/studio/libs.mjs", "text/javascript; charset=utf-8"],
+  ["/studio/lang-en.js", "text/javascript; charset=utf-8"],
+  ["/studio/i18n.js", "text/javascript; charset=utf-8"],
   ...["common", "home", "timeline", "trim", "editor", "cues", "names", "speakers", "burn", "shorts", "youtube", "recap", "mindmap", "main"]
     .map((n) => [`/studio/${n}.js`, "text/javascript; charset=utf-8"]),
 ]);
 
 // 會議轉錄 App 的共用元件（#111）：Markdown 排版、延伸頁籤、心智圖
-const SHARED_ASSETS = new Map([...["md", "ext", "mindmap"].flatMap((n) => [[`/shared/${n}.js`, "text/javascript; charset=utf-8"], [`/shared/${n}.css`, "text/css; charset=utf-8"]]), ["/shared/recap-files.js", "text/javascript; charset=utf-8"], ["/shared/icons.js", "text/javascript; charset=utf-8"]]);
+// 介面中英切換（#152）：翻譯引擎 i18n.js 與共用元件的英文字典 lang-en.js 也從那裡讀
+const SHARED_ASSETS = new Map([...["md", "ext", "mindmap"].flatMap((n) => [[`/shared/${n}.js`, "text/javascript; charset=utf-8"], [`/shared/${n}.css`, "text/css; charset=utf-8"]]),
+  ...["recap-files", "icons", "i18n", "lang-en"].map((n) => [`/shared/${n}.js`, "text/javascript; charset=utf-8"])]);
 
 // 剪輯的指紋：剪接版只要剪輯沒變就不用重新輸出
 export const cutsKey = (cuts) => (cuts || []).map((c) => `${c.start}-${c.end}`).join(",");

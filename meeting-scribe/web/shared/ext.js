@@ -17,16 +17,24 @@
 (function () {
   "use strict";
 
+  // 介面中英切換（#201）：用頁面登記的翻譯（web/shared/i18n.js 的 MeetingI18n.t）；沒載入就照中文
+  const _ = (zh, vars) => (window.MeetingI18n?.t ? window.MeetingI18n.t(zh, vars)
+    : vars ? zh.replace(/\{(\w+)\}/g, (m, k) => (Object.prototype.hasOwnProperty.call(vars, k) ? String(vars[k]) : m)) : zh);
   // 圖示從共用的 MeetingIcons（web/shared/icons.js，#168）拿，不在這裡畫；沒載入就只顯示文字。
   // 認得的模組給圖示與短名稱，其他模組（含擴充包加的）用通用的星芒；視角按鈕各有圖示
-  const LOOK = { sprout: { short: "發芽", icon: "sapling" }, perspective: { icon: "eye" } };
+  // 短名稱用函式：畫的時候才翻（頁面登記翻譯可能在這個檔載入之後）
+  const LOOK = { sprout: { short: () => _("發芽"), icon: "sapling" }, perspective: { icon: "eye" } };
   const CHOICE_ICON = { "perspective.who.boss": "briefcase", "perspective.who.sped": "cap", "perspective.who.parent": "house" };
   const COPIED_MS = 1500;
 
   const keyOf = (mod, options = {}) => [mod.id, ...(mod.options || []).map((o) => `${o.id}=${options[o.id]}`)].join(":");
-  const labelOf = (mod, options = {}) => {
+  // lang 給 "zh"／"en" 時用那個語言的固定格式（存檔的檔名與標題，跟介面語言無關，#204）；沒給就照介面語言（畫面上顯示）
+  const labelOf = (mod, options = {}, lang) => {
     const picked = (mod.options || []).map((o) => o.choices.find(([c]) => c === options[o.id])?.[1]).filter(Boolean);
-    return picked.length ? `${mod.title}（${picked.join("、")}）` : mod.title;
+    if (!picked.length) return mod.title;
+    if (lang === "zh") return `${mod.title}（${picked.join("、")}）`;   // 不翻：存檔的固定格式
+    if (lang === "en") return `${mod.title} (${picked.join(", ")})`;
+    return _("{title}（{choices}）", { title: mod.title, choices: picked.join(_("、")) });
   };
 
   function mount(container, hooks = {}) {
@@ -44,7 +52,7 @@
     const root = el("div", "ext-panel");
     const tabs = el("div", "ext-tabs");
     tabs.setAttribute("role", "tablist");
-    tabs.setAttribute("aria-label", "延伸的哪一種");
+    tabs.setAttribute("aria-label", _("延伸的哪一種"));
     const note = el("p", "ext-note");
     note.setAttribute("aria-live", "polite");
     const opts = el("div", "ext-opts");
@@ -84,10 +92,10 @@
         b.setAttribute("role", "tab");
         b.setAttribute("aria-selected", String(m.id === pickId));
         b.setAttribute("data-mod", m.id);
-        b.setAttribute("title", m.description ? `${m.title}：${m.description}` : m.title);
+        b.setAttribute("title", m.description ? _("{title}：{description}", { title: m.title, description: m.description }) : m.title);
         // 短名稱和模組名稱不一樣時（發芽），讀屏唸完整名稱
         if (look?.short) b.setAttribute("aria-label", m.title);
-        withIcon(b, look?.icon || "spark", look?.short || m.title);
+        withIcon(b, look?.icon || "spark", look?.short ? look.short() : m.title);
         return b;
       }));
 
@@ -105,7 +113,7 @@
           b.setAttribute("data-choice", v);
           const ci = CHOICE_ICON[`${mod.id}.${o.id}.${v}`];
           if (ci) withIcon(b, ci, l); else b.append(el("span", "", l));
-          if (resultOf(keyOf(mod, { ...options, [o.id]: v }))) b.append(el("span", "ext-done", "・已產生"));
+          if (resultOf(keyOf(mod, { ...options, [o.id]: v }))) b.append(el("span", "ext-done", _("・已產生")));
           group.append(b);
         }
         opts.append(group);
@@ -113,20 +121,20 @@
 
       // 說明行
       note.className = "ext-note";
-      if (mine) note.textContent = `正在產生「${busy.label}」，一兩分鐘就好。`;
-      else if (state.error) { note.textContent = `沒有產生成功：${state.error}`; note.className = "ext-note ext-warn"; }
-      else if (state.loading) note.textContent = "正在向會議轉錄 App 要延伸功能的清單…";
-      else if (!mods.length) note.textContent = "目前沒有延伸功能。";
-      else if (current?.stale) { note.textContent = `「${current.label}」產生之後內容改過了，要讓它跟上，按「重新產生」。`; note.className = "ext-note ext-warn"; }
-      else if (current) note.textContent = current.meta ? `${current.label}：${current.meta}` : current.label;
-      else note.textContent = mod?.description ? `${mod.title}：${mod.description}。還沒產生。` : "還沒產生。";
+      if (mine) note.textContent = _("正在產生「{label}」，一兩分鐘就好。", { label: busy.label });
+      else if (state.error) { note.textContent = _("沒有產生成功：{error}", { error: state.error }); note.className = "ext-note ext-warn"; }
+      else if (state.loading) note.textContent = _("正在向會議轉錄 App 要延伸功能的清單…");
+      else if (!mods.length) note.textContent = _("目前沒有延伸功能。");
+      else if (current?.stale) { note.textContent = _("「{label}」產生之後內容改過了，要讓它跟上，按「重新產生」。", { label: current.label }); note.className = "ext-note ext-warn"; }
+      else if (current) note.textContent = current.meta ? _("{label}：{meta}", { label: current.label, meta: current.meta }) : current.label;
+      else note.textContent = mod?.description ? _("{title}：{description}。還沒產生。", { title: mod.title, description: mod.description }) : _("還沒產生。");
 
       // 動作
       actions.replaceChildren();
-      const run = button("ext-run", mine ? "正在產生…" : current ? "重新產生" : "產生", () => { if (mod && !state.busy) hooks.onRun?.(mod, optionsOf(mod)); });
+      const run = button("ext-run", mine ? _("正在產生…") : current ? _("重新產生") : _("產生"), () => { if (mod && !state.busy) hooks.onRun?.(mod, optionsOf(mod)); });
       run.disabled = !mod || Boolean(busy);
       actions.append(run);
-      if (mine && hooks.onStop) actions.append(button("ext-stop", "停止", () => hooks.onStop()));
+      if (mine && hooks.onStop) actions.append(button("ext-stop", _("停止"), () => hooks.onStop()));
       if (current) {
         // 複製後按鈕閃一下「已複製」（失敗就說要手動選取），兩邊一樣
         const key = current.key, flash = (ok) => {
@@ -134,13 +142,13 @@
           copied = ok ? `ok:${key}` : `fail:${key}`; draw();
           clearTimeout(copiedTimer); copiedTimer = setTimeout(() => { copied = ""; draw(); }, COPIED_MS);
         };
-        const copyText = copied === `ok:${key}` ? "已複製" : copied === `fail:${key}` ? "複製失敗，請手動選取" : "複製";
+        const copyText = copied === `ok:${key}` ? _("已複製") : copied === `fail:${key}` ? _("複製失敗，請手動選取") : _("複製");
         actions.append(button("ext-copy", copyText, () => {
           Promise.resolve().then(() => copy(current.markdown, current)).then((r) => flash(r !== false), () => flash(false));
         }));
-        if (hooks.onReveal) actions.append(button("ext-reveal", "在 Finder 顯示", () => hooks.onReveal(current)));
+        if (hooks.onReveal) actions.append(button("ext-reveal", _("在 Finder 顯示"), () => hooks.onReveal(current)));
         if (hooks.onRemove) {
-          const rm = button("ext-remove", armed === current.key ? "確定移除？" : "移除", () => {
+          const rm = button("ext-remove", armed === current.key ? _("確定移除？") : _("移除"), () => {
             if (armed !== current.key) { armed = current.key; draw(); return; }
             armed = "";
             hooks.onRemove(current);
@@ -164,5 +172,5 @@
     });
   }
 
-  window.ExtPanel = Object.freeze({ mount, keyOf, labelOf, version: "1.1" });
+  window.ExtPanel = Object.freeze({ mount, keyOf, labelOf, version: "1.2" });
 })();

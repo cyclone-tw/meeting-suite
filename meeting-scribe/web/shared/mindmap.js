@@ -4,7 +4,10 @@
 // 標籤來自 AI：進 DOM 一律 textContent／setAttribute，不拼 HTML。
 (() => {
   "use strict";
-  const VERSION = "1.0.0";
+  const VERSION = "1.1.0";
+  // 介面中英切換（#201）：用頁面登記的翻譯（web/shared/i18n.js 的 MeetingI18n.t）；沒載入就照中文
+  const _ = (zh, vars) => (window.MeetingI18n?.t ? window.MeetingI18n.t(zh, vars)
+    : vars ? zh.replace(/\{(\w+)\}/g, (m, k) => (Object.prototype.hasOwnProperty.call(vars, k) ? String(vars[k]) : m)) : zh);
   const NS = "http://www.w3.org/2000/svg", FONT = 'system-ui, -apple-system, "PingFang TC", "Noto Sans TC", sans-serif';
   // 配色（#127）：print＝存檔、下載用的固定淺色版（不動）；light／dark 是畫面上的，分支色取自心智圖產生器的「繽紛」配色，暗色版調亮、底色調深
   const THEMES = {
@@ -23,14 +26,14 @@
     const walk = (n) => {
       if (!n || typeof n !== "object") return null;
       const children = (Array.isArray(n.children) ? n.children : []).map(walk).filter(Boolean), l = label(n.label);
-      return l || children.length ? { label: l || "（未命名）", children } : null;
+      return l || children.length ? { label: l || "（未命名）", children } : null;   // 不翻：存進心智圖的標籤
     };
     map = map && typeof map === "object" ? map : {};
-    return { center: label(map.center) || "（未命名）", branches: (Array.isArray(map.branches) ? map.branches : []).map(walk).filter(Boolean) };
+    return { center: label(map.center) || "（未命名）", branches: (Array.isArray(map.branches) ? map.branches : []).map(walk).filter(Boolean) };   // 不翻：存進心智圖的標籤
   }
 
   // Mermaid 的括號有特殊意義：換成全形，貼到 Notion／Obsidian 才不會壞
-  const mermaidLabel = (t) => String(t).replace(/[()]/g, (c) => (c === "(" ? "（" : "）")).replace(/[[\]{}]/g, (c) => ({ "[": "［", "]": "］", "{": "｛", "}": "｝" })[c]).replace(/\s+/g, " ").trim();
+  const mermaidLabel = (t) => String(t).replace(/[()]/g, (c) => (c === "(" ? "（" : "）")).replace(/[[\]{}]/g, (c) => ({ "[": "［", "]": "］", "{": "｛", "}": "｝" })[c]).replace(/\s+/g, " ").trim();   // 不翻：Mermaid 語法的替代字
   function toMermaid(map) {
     const m = view(map), out = ["mindmap", `  root((${mermaidLabel(m.center)}))`];
     const walk = (n, d) => { out.push("  ".repeat(d + 1) + mermaidLabel(n.label)); n.children.forEach((c) => walk(c, d + 1)); };
@@ -41,7 +44,7 @@
     const m = view(map), outline = [];
     const walk = (n, d) => { outline.push("  ".repeat(d) + "- " + n.label); n.children.forEach((c) => walk(c, d + 1)); };
     m.branches.forEach((b) => walk(b, 0));
-    return `# 心智圖：${m.center}\n\n\`\`\`mermaid\n${toMermaid(map)}\n\`\`\`\n\n## 大綱\n\n${outline.join("\n")}\n`;
+    return `# 心智圖：${m.center}\n\n\`\`\`mermaid\n${toMermaid(map)}\n\`\`\`\n\n## 大綱\n\n${outline.join("\n")}\n`;   // 不翻：存檔內容
   }
   // .opml：XMind、MindNode、SimpleMind、iThoughts、MindManager 都能匯入繼續改。中心主題是唯一的最上層 outline
   function toOpml(map) {
@@ -103,7 +106,7 @@
     const svg = document.createElementNS(NS, "svg");
     svg.setAttribute("xmlns", NS);
     svg.setAttribute("width", W); svg.setAttribute("height", h); svg.setAttribute("viewBox", `0 0 ${W} ${h}`);
-    svg.setAttribute("role", live ? "group" : "img"); svg.setAttribute("aria-label", "心智圖：" + map.center);
+    svg.setAttribute("role", live ? "group" : "img"); svg.setAttribute("aria-label", _("心智圖：{center}", { center: map.center }));
     const el = (tag, attrs, parent = svg) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); parent.append(e); return e; };
     if (!live) el("rect", { x: 0, y: 0, width: W, height: h, rx: 14, fill: T.bg });
     const links = el("g", { fill: "none", "stroke-width": 2 }), nodes = el("g", {});
@@ -116,7 +119,7 @@
       const fold = live && d >= 1 && n.children?.length;
       if (fold) {
         const open = !closed.has(n.key);
-        g = el("g", { class: "mm-node", "data-key": n.key, tabindex: 0, role: "button", "aria-expanded": String(open), "aria-label": `${label}（${open ? "按一下收合" : `已收合 ${count(n)} 項，按一下展開`}）` }, nodes);
+        g = el("g", { class: "mm-node", "data-key": n.key, tabindex: 0, role: "button", "aria-expanded": String(open), "aria-label": open ? _("{label}（按一下收合）", { label }) : _("{label}（已收合 {n} 項，按一下展開）", { label, n: count(n) }) }, nodes);
       }
       const box = live ? { class: "mm-box" } : {};
       if (d <= 1) el("rect", { ...box, x: x - w / 2, y: y - nh / 2, width: w, height: nh, rx: nh / 2, fill }, g);
@@ -202,21 +205,21 @@
     const tools = mk("div", { className: "mm-tools" });
     const P = {
       root, tools,
-      "edit-btn": btn("edit-btn", "編輯", "直接改字、加減項目、調整順序"),
-      copy: btn("copy", "複製 Mermaid", "貼到 Notion、Obsidian、GitHub 會自動畫成心智圖"),
-      png: btn("png", "下載圖片"),
-      opml: btn("opml", "匯出到心智圖 App", "下載 .opml，XMind、MindNode、SimpleMind 等心智圖 App 打開後可以繼續改"),
+      "edit-btn": btn("edit-btn", _("編輯"), _("直接改字、加減項目、調整順序")),
+      copy: btn("copy", _("複製 Mermaid"), _("貼到 Notion、Obsidian、GitHub 會自動畫成心智圖")),
+      png: btn("png", _("下載圖片")),
+      opml: btn("opml", _("匯出到心智圖 App"), _("下載 .opml，XMind、MindNode、SimpleMind 等心智圖 App 打開後可以繼續改")),
       note: mk("p", { className: "mm-note", hidden: true }),
       viewer: mk("div", { className: "mm-viewer" }),
       bar: mk("div", { className: "mm-bar" }),
-      "zoom-out": btn("zoom-out", "−", "縮小（−）"),
+      "zoom-out": btn("zoom-out", "−", _("縮小（−）")),
       scale: mk("span", { className: "mm-scale", textContent: "100%" }),
-      "zoom-in": btn("zoom-in", "＋", "放大（＋）"),
-      fit: btn("fit", "符合畫面", "整張圖放進畫面（0）"),
-      "expand-all": btn("expand-all", "全部展開"),
-      "collapse-all": btn("collapse-all", "全部收合", "只留中心和議題"),
-      theme: btn("theme", "亮色"),
-      full: btn("full", "大畫面", "蓋滿整個視窗看"),
+      "zoom-in": btn("zoom-in", _("＋"), _("放大（＋）")),
+      fit: btn("fit", _("符合畫面"), _("整張圖放進畫面（0）")),
+      "expand-all": btn("expand-all", _("全部展開")),
+      "collapse-all": btn("collapse-all", _("全部收合"), _("只留中心和議題")),
+      theme: btn("theme", _("亮色")),
+      full: btn("full", _("大畫面"), _("蓋滿整個視窗看")),
       body: mk("div", { className: "mm-body", tabIndex: 0 }),
       stage: mk("div", { className: "mm-stage" }),
       hint: mk("p", { className: "mm-hint" }),
@@ -224,11 +227,11 @@
       undo: null,
     };
     P["edit-btn"].setAttribute("aria-pressed", "false");
-    P.viewer.setAttribute("aria-label", "心智圖");
-    P.bar.setAttribute("role", "toolbar"); P.bar.setAttribute("aria-label", "心智圖檢視");
+    P.viewer.setAttribute("aria-label", _("心智圖"));
+    P.bar.setAttribute("role", "toolbar"); P.bar.setAttribute("aria-label", _("心智圖檢視"));
     P.scale.setAttribute("aria-live", "polite");
-    P.body.setAttribute("aria-label", "心智圖畫布：拖曳移動，＋／−縮放，0 符合畫面");
-    for (const [k, label] of [["zoom-out", "縮小"], ["zoom-in", "放大"], ["fit", "符合畫面"], ["expand-all", "全部展開"], ["collapse-all", "全部收合"]]) P[k].setAttribute("aria-label", label);
+    P.body.setAttribute("aria-label", _("心智圖畫布：拖曳移動，＋／−縮放，0 符合畫面"));
+    for (const [k, label] of [["zoom-out", _("縮小")], ["zoom-in", _("放大")], ["fit", _("符合畫面")], ["expand-all", _("全部展開")], ["collapse-all", _("全部收合")]]) P[k].setAttribute("aria-label", label);
     tools.append(P["edit-btn"], P.copy, P.png, P.opml);
     P.bar.append(P["zoom-out"], P.scale, P["zoom-in"], P.fit, P["expand-all"], P["collapse-all"], mk("span", { className: "mm-sep" }), P.theme, P.full);
     P.body.append(P.stage);
@@ -258,7 +261,7 @@
       P.copy.hidden = P.png.hidden = P.opml.hidden = !map;
       tools.hidden = !map;
       P["edit-btn"].setAttribute("aria-pressed", String(editing));
-      P["edit-btn"].textContent = editing ? "完成編輯" : "編輯";
+      P["edit-btn"].textContent = editing ? _("完成編輯") : _("編輯");
       if (!map) say("");
       renderSvg();
       renderEdit();
@@ -298,7 +301,7 @@
       if (!editing) return;
       inputs = new WeakMap();
       const field = (node, key, depth, aria) => {
-        const input = mk("input", { type: "text", value: node[key] ?? "", maxLength: LABEL_MAX, placeholder: depth ? "輸入文字" : "中心主題" });
+        const input = mk("input", { type: "text", value: node[key] ?? "", maxLength: LABEL_MAX, placeholder: depth ? _("輸入文字") : _("中心主題") });
         input.setAttribute("aria-label", aria);
         // 改字前的樣子在第一次輸入時記（不靠 focus 事件：頁面在背景時不一定會觸發）；change 時收成一步復原並通知頁面
         let before = null;
@@ -323,12 +326,12 @@
       };
       const row = (depth) => { const r = mk("div", { className: "mm-row" }); r.style.setProperty("--d", depth); return r; };
       const center = row(0);
-      center.append(field(map, "center", 0, "中心主題"));
+      center.append(field(map, "center", 0, _("中心主題")));
       box.append(center);
-      const NAMES = ["議題", "重點", "細節"];
+      const NAMES = [_("議題"), _("重點"), _("細節")];
       const walk = (list, depth, parent) => list.forEach((node, i) => {
         const r = row(depth);
-        const input = field(node, "label", depth, `第 ${depth} 層（${NAMES[depth - 1]}）`);
+        const input = field(node, "label", depth, _("第 {depth} 層（{name}）", { depth, name: NAMES[depth - 1] }));
         // Enter：在下面加一格同一層的（中文輸入法選字時不算）
         input.onkeydown = (e) => {
           if (e.key !== "Enter" || e.isComposing || e.keyCode === 229) return;
@@ -337,18 +340,18 @@
           change(() => { const n = { label: "", children: [] }; list.splice(i + 1, 0, n); return n; });
         };
         r.append(input,
-          tool("＋", `在「${node.label || "這一格"}」下面加${NAMES[depth] || ""}`, () => change(() => { const n = { label: "", children: [] }; (node.children ||= []).push(n); return n; }), depth >= DEPTH),
-          tool("↑", "往上移", () => change(() => { list.splice(i - 1, 0, ...list.splice(i, 1)); return node; }), i === 0),
-          tool("↓", "往下移", () => change(() => { list.splice(i + 1, 0, ...list.splice(i, 1)); return node; }), i === list.length - 1),
-          tool("✕", `刪掉「${node.label || "這一格"}」${node.children?.length ? "和底下的項目" : ""}`, () => change(() => { list.splice(i, 1); return list[i] || list[i - 1] || parent; })));
+          tool(_("＋"), _("在「{label}」下面加{name}", { label: node.label || _("這一格"), name: NAMES[depth] || "" }), () => change(() => { const n = { label: "", children: [] }; (node.children ||= []).push(n); return n; }), depth >= DEPTH),
+          tool("↑", _("往上移"), () => change(() => { list.splice(i - 1, 0, ...list.splice(i, 1)); return node; }), i === 0),
+          tool("↓", _("往下移"), () => change(() => { list.splice(i + 1, 0, ...list.splice(i, 1)); return node; }), i === list.length - 1),
+          tool("✕", _("刪掉「{label}」{more}", { label: node.label || _("這一格"), more: node.children?.length ? _("和底下的項目") : "" }), () => change(() => { list.splice(i, 1); return list[i] || list[i - 1] || parent; })));
         box.append(r);
         if (node.children?.length && depth < DEPTH) walk(node.children, depth + 1, node);
       });
       walk(map.branches ||= [], 1, map);
       const foot = mk("div", { className: "mm-foot" });
-      P.undo = mk("button", { type: "button", textContent: "復原", onclick: undoLast }, "undo");
-      const done = mk("button", { type: "button", textContent: "完成編輯", onclick: () => { editing = false; render(); P["edit-btn"].focus(); } }, "done");
-      foot.append(tool("＋ 新增議題", "在最後加一個議題", () => change(() => { const n = { label: "", children: [] }; map.branches.push(n); return n; })), P.undo, done);
+      P.undo = mk("button", { type: "button", textContent: _("復原"), onclick: undoLast }, "undo");
+      const done = mk("button", { type: "button", textContent: _("完成編輯"), onclick: () => { editing = false; render(); P["edit-btn"].focus(); } }, "done");
+      foot.append(tool(_("＋ 新增議題"), _("在最後加一個議題"), () => change(() => { const n = { label: "", children: [] }; map.branches.push(n); return n; })), P.undo, done);
       box.append(foot);
       renderUndo();
     }
@@ -434,14 +437,14 @@
     }
     function renderBar() {
       const full = isFull(), light = themeNow() === "light";
-      P.full.textContent = full ? "關閉" : "大畫面";
-      P.full.setAttribute("aria-label", full ? "關閉大畫面" : "大畫面檢視");
-      P.full.title = full ? "回到原位（Esc）" : "蓋滿整個視窗看";
-      P.theme.textContent = light ? "暗色" : "亮色";
-      P.theme.setAttribute("aria-label", light ? "改成暗色" : "改成亮色");
+      P.full.textContent = full ? _("關閉") : _("大畫面");
+      P.full.setAttribute("aria-label", full ? _("關閉大畫面") : _("大畫面檢視"));
+      P.full.title = full ? _("回到原位（Esc）") : _("蓋滿整個視窗看");
+      P.theme.textContent = light ? _("暗色") : _("亮色");
+      P.theme.setAttribute("aria-label", light ? _("改成暗色") : _("改成亮色"));
       // 手機、平板（只有觸控）不提滾輪和 Esc
-      P.hint.textContent = matchMedia("(pointer: coarse)").matches ? "單指拖曳移動・雙指縮放・點議題收合／展開"
-        : full ? "拖曳移動・滾輪或雙指縮放・點議題收合／展開・Esc 關閉" : "拖曳移動・Ctrl＋滾輪或觸控板捏合縮放・點議題收合／展開";
+      P.hint.textContent = matchMedia("(pointer: coarse)").matches ? _("單指拖曳移動・雙指縮放・點議題收合／展開")
+        : full ? _("拖曳移動・滾輪或雙指縮放・點議題收合／展開・Esc 關閉") : _("拖曳移動・Ctrl＋滾輪或觸控板捏合縮放・點議題收合／展開");
     }
 
     // ---- 按鈕 ----
@@ -461,7 +464,7 @@
       b.textContent = text;
       setTimeout(() => { b.textContent = label; }, 1500);
     };
-    P.copy.onclick = async () => { if (map) flash(P.copy, (await copyToClipboard(toMermaid(map))) ? "已複製" : "複製失敗，請手動選取"); };
+    P.copy.onclick = async () => { if (map) flash(P.copy, (await copyToClipboard(toMermaid(map))) ? _("已複製") : _("複製失敗，請手動選取")); };
     P.opml.onclick = () => { if (map) download(new Blob([toOpml(map)], { type: "text/x-opml" }), `${safeName(fileName)}.opml`); };
     P.png.onclick = async () => {
       if (!map) return;
@@ -476,7 +479,7 @@
         canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
         canvas.toBlob((blob) => download(blob, `${safeName(fileName)}.png`), "image/png");
       } catch (e) {
-        say("這個瀏覽器沒辦法轉成圖片，可以改用「複製 Mermaid」或「匯出到心智圖 App」。", true);
+        say(_("這個瀏覽器沒辦法轉成圖片，可以改用「複製 Mermaid」或「匯出到心智圖 App」。"), true);
       }
     };
 

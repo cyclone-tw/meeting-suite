@@ -10,12 +10,12 @@ const longOf = (c) => (state.foreign ? ops.tooLong(c.tr || "") : ops.tooLong(c.t
 const visible = (c) => state.filter === "all" || (state.filter === "ai" && c.ai?.length) || (state.filter === "long" && longOf(c));
 function rowTags(c) {
   const t = [];
-  if (c.ai?.length) t.push(`<span class="badge ai" title="AI 修正">AI：${c.ai.map((e) => `${esc(e.find)}→${esc(e.replace)}`).join("、")}</span>`);
-  if (longOf(c)) t.push(`<span class="badge warn">${state.foreign ? "譯文太長" : "一行太長"}</span>`);
-  if (!c.text.trim()) t.push(`<span class="badge warn">空白（不會輸出）</span>`);
+  if (c.ai?.length) t.push(`<span class="badge ai" title="${_("AI 修正")}">${_("AI：{list}", { list: c.ai.map((e) => `${esc(e.find)}→${esc(e.replace)}`).join(_("、")) })}</span>`);
+  if (longOf(c)) t.push(`<span class="badge warn">${state.foreign ? _("譯文太長") : _("一行太長")}</span>`);
+  if (!c.text.trim()) t.push(`<span class="badge warn">${_("空白（不會輸出）")}</span>`);
   const share = cutOps.cutShare(state.cuts, c.start, c.end);
-  if (share >= 0.99) t.push(`<span class="badge warn">剪掉了</span>`);
-  else if (share > 0.2) t.push(`<span class="badge warn">部分剪掉</span>`);
+  if (share >= 0.99) t.push(`<span class="badge warn">${_("剪掉了")}</span>`);
+  else if (share > 0.2) t.push(`<span class="badge warn">${_("部分剪掉")}</span>`);
   return t.join("");
 }
 function renderList() {
@@ -23,18 +23,18 @@ function renderList() {
   const rows = [];
   state.cues.forEach((c, i) => {
     if (!visible(c) || (find && !c.text.includes(find) && !String(c.tr || "").includes(find))) return;
-    const tr = state.foreign ? `<input class="tr" value="${esc(c.tr || "")}" data-tr="${i}" spellcheck="false" placeholder="（還沒有譯文）" aria-label="第 ${i + 1} 句的中文譯文">` : "";
-    rows.push(`<li class="row${!state.foreign && ops.tooLong(c.text) ? " long" : ""}${cutOps.cutShare(state.cuts, c.start, c.end) >= 0.99 ? " cut" : ""}" data-i="${i}"><time data-seek="${i}">${ops.fmtTime(c.start)}</time><input value="${esc(c.text)}" data-i="${i}" spellcheck="false" aria-label="第 ${i + 1} 句">${tr}<div class="tags">${rowTags(c)}</div></li>`);
+    const tr = state.foreign ? `<input class="tr" value="${esc(c.tr || "")}" data-tr="${i}" spellcheck="false" placeholder="${_("（還沒有譯文）")}" aria-label="${_("第 {n} 句的中文譯文", { n: i + 1 })}">` : "";
+    rows.push(`<li class="row${!state.foreign && ops.tooLong(c.text) ? " long" : ""}${cutOps.cutShare(state.cuts, c.start, c.end) >= 0.99 ? " cut" : ""}" data-i="${i}"><time data-seek="${i}">${ops.fmtTime(c.start)}</time><input value="${esc(c.text)}" data-i="${i}" spellcheck="false" aria-label="${_("第 {n} 句", { n: i + 1 })}">${tr}<div class="tags">${rowTags(c)}</div></li>`);
   });
-  $("#cueList").innerHTML = rows.join("") || `<li class="muted" style="padding:16px">沒有符合的字幕</li>`;
+  $("#cueList").innerHTML = rows.join("") || `<li class="muted" style="padding:16px">${_("沒有符合的字幕")}</li>`;
   const counts = { ai: state.cues.filter((c) => c.ai?.length).length, long: state.cues.filter(longOf).length };
   for (const b of document.querySelectorAll("#filterSeg button")) {
     b.setAttribute("aria-pressed", String(b.dataset.f === state.filter));
-    if (b.dataset.f !== "all") b.textContent = `${b.dataset.f === "ai" ? "AI 改過" : "太長"} ${counts[b.dataset.f]}`;
+    if (b.dataset.f !== "all") b.textContent = b.dataset.f === "ai" ? _("AI 改過 {count}", { count: counts[b.dataset.f] }) : _("太長 {count}", { count: counts[b.dataset.f] });
   }
   footNote(state.p?.report);
   $("#repBtn").disabled = !find;
-  $("#repBtn").textContent = find ? `全部取代（${ops.countIn(state.cues, find)}）` : "全部取代";
+  $("#repBtn").textContent = find ? _("全部取代（{n}）", { n: ops.countIn(state.cues, find) }) : _("全部取代");
   markRows();
 }
 const rowOf = (i) => $(`#cueList li[data-i="${i}"]`);
@@ -78,7 +78,7 @@ $("#repBtn").onclick = () => {
   changed();
   renderList();
   showCue();
-  toast(`已取代 ${r.count} 處。`, [{ label: "復原", run: undo }]);
+  toast(_("已取代 {n} 處。", { n: r.count }), [{ label: _("復原"), run: undo }]);
 };
 
 $("#cueList").addEventListener("click", (e) => {
@@ -154,21 +154,21 @@ function showCue() {
   $("#gapNote").hidden = !(state.play === -1 && video.paused && video.readyState > 0 && state.cues.length > 0);
   $("#cueBox").hidden = !c;
   if (!c) return;
-  $("#cueNo").textContent = `第 ${state.sel + 1} 句 / ${state.cues.length}`;
-  $("#cueTime").textContent = `${ops.fmtTime(c.start, true)} → ${ops.fmtTime(c.end, true)}（${((c.end - c.start) / 1000).toFixed(1)} 秒）`;
+  $("#cueNo").textContent = _("第 {n} 句 / {total}", { n: state.sel + 1, total: state.cues.length });
+  $("#cueTime").textContent = _("{from} → {to}（{sec} 秒）", { from: ops.fmtTime(c.start, true), to: ops.fmtTime(c.end, true), sec: ((c.end - c.start) / 1000).toFixed(1) });
   if (document.activeElement !== $("#cueText")) $("#cueText").value = c.text;
   if (document.activeElement !== $("#cueTr")) $("#cueTr").value = c.tr || "";
   const long = longOf(c);
   $(state.foreign ? "#cueTr" : "#cueText").classList.toggle("long", long);
-  $("#cueLong").textContent = state.foreign ? "譯文太長" : "一行太長";
+  $("#cueLong").textContent = state.foreign ? _("譯文太長") : _("一行太長");
   $("#cueLong").hidden = !long;
   $("#mergeBtn").disabled = state.sel >= state.cues.length - 1;
   const gone = cutOps.cutShare(state.cuts, c.start, c.end) >= 0.99;
-  $("#cutCueBtn").textContent = gone ? "恢復這一句" : "剪掉這一句";
+  $("#cutCueBtn").textContent = gone ? _("恢復這一句") : _("剪掉這一句");
   $("#cutCueBtn").dataset.gone = gone ? "1" : "";
   const ai = $("#aiNote");
   ai.hidden = !c.ai?.length;
-  ai.innerHTML = c.ai?.length ? `AI 修正了這句：${c.ai.map((e, k) => `「${esc(e.find)}」→「${esc(e.replace)}」 <button class="btn sm" data-revert="${k}">改回原字</button>`).join("　")} <button class="btn sm" data-ok>沒問題</button>` : "";
+  ai.innerHTML = c.ai?.length ? `${_("AI 修正了這句：{list}", { list: c.ai.map((e, k) => `${_("「{find}」→「{replace}」", { find: esc(e.find), replace: esc(e.replace) })} <button class="btn sm" data-revert="${k}">${_("改回原字")}</button>`).join(" ") })} <button class="btn sm" data-ok>${_("沒問題")}</button>` : "";
 }
 const isEditing = () => document.activeElement === $("#cueText") || document.activeElement === $("#cueTr") || !!document.activeElement?.closest?.("#cueList input");
 
@@ -180,9 +180,9 @@ $("#aiNote").onclick = (e) => {
   pushUndo();
   if (r) {
     const edit = c.ai[Number(r.dataset.revert)];
-    const target = edit.replace.replace(/[，。、！？；：]/gu, " ").trim();
-    c.text = c.text.replace(target, edit.find.replace(/[，。、！？；：]/gu, " ").trim());
-    c.ai = c.ai.filter((_, k) => k !== Number(r.dataset.revert));
+    const target = edit.replace.replace(/[，。、！？；：]/gu, " ").trim();   // 不翻：正規式（比對中文標點）
+    c.text = c.text.replace(target, edit.find.replace(/[，。、！？；：]/gu, " ").trim());   // 不翻：正規式（比對中文標點）
+    c.ai = c.ai.filter((x0, k) => k !== Number(r.dataset.revert));
   } else {
     delete c.ai;
   }
@@ -194,7 +194,7 @@ $("#aiNote").onclick = (e) => {
 };
 function renderListCountsOnly() {
   const counts = { ai: state.cues.filter((c) => c.ai?.length).length, long: state.cues.filter(longOf).length };
-  for (const b of document.querySelectorAll("#filterSeg button")) if (b.dataset.f !== "all") b.textContent = `${b.dataset.f === "ai" ? "AI 改過" : "太長"} ${counts[b.dataset.f]}`;
+  for (const b of document.querySelectorAll("#filterSeg button")) if (b.dataset.f !== "all") b.textContent = b.dataset.f === "ai" ? _("AI 改過 {count}", { count: counts[b.dataset.f] }) : _("太長 {count}", { count: counts[b.dataset.f] });
 }
 
 $("#cueText").addEventListener("focus", () => beginEdit(state.sel));
@@ -296,25 +296,25 @@ function suggestCorrection(before, after, i) {
   const others = ops.countIn(state.cues, s.wrong, i);
   const known = state.corr && [...state.corr.hints, ...state.corr.fixed].some(([w, r]) => w === s.wrong && r === s.right);
   const actions = [];
-  if (!known) actions.push({ label: "加入錯字表", solid: true, run: () => addCorr(s.wrong, s.right) });
-  if (others) actions.push({ label: `其他 ${others} 處也改`, run: () => {
+  if (!known) actions.push({ label: _("加入錯字表"), solid: true, run: () => addCorr(s.wrong, s.right) });
+  if (others) actions.push({ label: _("其他 {n} 處也改", { n: others }), run: () => {
     pushUndo();
     state.cues = ops.replaceAll(state.cues, s.wrong, s.right, i).cues;
     changed();
     renderList();
-    toast(`已改 ${others} 處。`, [{ label: "復原", run: undo }]);
+    toast(_("已改 {n} 處。", { n: others }), [{ label: _("復原"), run: undo }]);
   } });
   if (!actions.length) return;
-  actions.push({ label: "不用" });
-  toast(`「${esc(s.wrong)}」改成「${esc(s.right)}」。${known ? "" : "加進錯字表，之後會議轉錄和字幕都會更準。"}`, actions, 15000);
+  actions.push({ label: _("不用") });
+  toast(_("「{wrong}」改成「{right}」。{note}", { wrong: esc(s.wrong), right: esc(s.right), note: known ? "" : _("加進錯字表，之後會議轉錄和字幕都會更準。") }), actions, 15000);
 }
 
 async function addCorr(wrong, right) {
   try {
     const r = await post("/api/corrections", { wrong, right });
-    toast(r.added ? `已加入錯字表（共 ${r.hints + r.fixed} 組，存在 mini）。` : "錯字表裡已經有了。", [], 5000);
+    toast(r.added ? _("已加入錯字表（共 {n} 組，存在 mini）。", { n: r.hints + r.fixed }) : _("錯字表裡已經有了。"), [], 5000);
     loadCorr(true);
-  } catch (e) { showAlert(`沒加成功：${e.message}`); }
+  } catch (e) { showAlert(_("沒加成功：{err}", { err: e.message })); }
 }
 
 // ---- 結構性修改：拆、合、刪、調時間 ----
@@ -362,7 +362,7 @@ $("#mergeBtn").onclick = () => structural(() => ops.mergeNext(state.cues, state.
 $("#delBtn").onclick = () => {
   const i = state.sel;
   structural(() => ops.removeCue(state.cues, i), Math.min(i, state.cues.length - 2));
-  toast("刪掉了一句。", [{ label: "復原", run: undo }]);
+  toast(_("刪掉了一句。"), [{ label: _("復原"), run: undo }]);
 };
 for (const b of document.querySelectorAll(".cue-tools .grp .btn")) {
   b.onclick = () => {
@@ -408,7 +408,7 @@ video.addEventListener("pause", () => { setPlayIcon(); tick(); });
 video.addEventListener("seeked", tick);
 function setPlayIcon() {
   $("#playBtn").innerHTML = `<svg class="icon"><use href="#i-${video.paused ? "play" : "pause"}"/></svg>`;
-  $("#playBtn").setAttribute("aria-label", video.paused ? "播放" : "暫停");
+  $("#playBtn").setAttribute("aria-label", video.paused ? _("播放") : _("暫停"));
 }
 function loop() { if (video.paused) return; tick(); requestAnimationFrame(loop); }
 
@@ -471,7 +471,7 @@ let saveTimer = 0, saving = null, dirty = false, saveFailed = false;
 function changed() {
   dirty = true;
   $("#saveNote").classList.remove("err");
-  $("#saveNote").textContent = "有修改，稍後自動儲存…";
+  $("#saveNote").textContent = _("有修改，稍後自動儲存…");
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => flushSave(), 800);
 }
@@ -482,14 +482,14 @@ async function flushSave() {
   if (saving) await saving;
   if (!dirty || !state.id) return;
   dirty = false;
-  $("#saveNote").textContent = "儲存中…";
+  $("#saveNote").textContent = _("儲存中…");
   const savingId = state.id;   // 等回應時可能已經換了專案：結果只算在原本那個專案上
   saving = api(`/api/projects/${state.id}`, { method: "PUT", body: JSON.stringify({ rev: state.rev, cues: state.cues, cuts: state.cuts, ...(descBusyId === state.id ? {} : { description: state.desc }), size: state.size, style: state.style, ...(state.foreign ? { lang_mode: state.langMode } : {}), ...(state.p?.suggestions ? { suggestions: (state.p.suggestions.items || []).map((x) => x.id), suggestionsCreated: state.p.suggestions.created } : {}) }) })
     .then((r) => {
       if (savingId !== state.id) return;
       saveFailed = false;
       state.rev = r.rev;
-      $("#saveNote").textContent = `已儲存 ${new Date(r.updated).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" })}`;
+      $("#saveNote").textContent = _("已儲存 {time}", { time: new Date(r.updated).toLocaleTimeString(UI_LANG === "en" ? "en-US" : "zh-TW", { hour: "2-digit", minute: "2-digit" }) });
     })
     .catch((e) => {
       // 409 別的分頁改過、400 內容不合規（例如一句超過 200 字）：重試也沒用，請使用者處理
@@ -498,7 +498,7 @@ async function flushSave() {
       saveFailed = true;
       dirty = !final;
       $("#saveNote").classList.add("err");
-      $("#saveNote").textContent = e.status === 409 ? "別的分頁改過，請重新整理" : e.status === 400 ? "沒存成功，請看提示" : "沒存成功，會再試";
+      $("#saveNote").textContent = e.status === 409 ? _("別的分頁改過，請重新整理") : e.status === 400 ? _("沒存成功，請看提示") : _("沒存成功，會再試");
       if (final) showAlert(e.message);
       else saveTimer = setTimeout(() => flushSave(), 4000);
     })
@@ -512,7 +512,7 @@ document.addEventListener("visibilitychange", () => { if (document.hidden) flush
 const utf8Len = (t) => new TextEncoder().encode(t).length;
 function descCount() {
   const t = $("#descText").value;
-  $("#descCount").textContent = `${t.length} 字${utf8Len(t) > 5000 ? "（超過 YouTube 上限：5000 位元組，中文約 1600 字）" : ""}`;
+  $("#descCount").textContent = _("{count} 字{note}", { count: t.length, note: utf8Len(t) > 5000 ? _("（超過 YouTube 上限：5000 位元組，中文約 1600 字）") : "" });
 }
 $("#descText").oninput = () => { state.desc = $("#descText").value; descCount(); changed(); };
 // 寫說明欄的時候還可以改字幕；說明欄先鎖住，存檔也先不送說明欄，免得把等一下的新內容蓋掉。
@@ -522,7 +522,7 @@ function showDescBusy() {
   const on = Boolean(descBusyId) && descBusyId === state.id;
   $("#descText").readOnly = on;
   $("#descRedo").disabled = Boolean(descBusyId);
-  $("#descRedo").textContent = on ? "正在寫…（約一分鐘）" : "重新寫說明欄…";
+  $("#descRedo").textContent = on ? _("正在寫…（約一分鐘）") : _("重新寫說明欄…");
   $("#descStop").hidden = !on;
 }
 function setDescBusy(id) { descBusyId = id; showDescBusy(); }
@@ -537,7 +537,7 @@ async function rewriteDescription() {
     $("#descText").value = state.desc;
     descCount();
     if (state.p) state.p.youtube_suggest = r.youtube_suggest;
-    toast(`說明欄寫好了${r.chapters >= 3 ? `，共 ${r.chapters} 章` : ""}。上傳 YouTube 時也會帶入新的名稱和標籤建議。`, [], 6000);
+    toast(_("說明欄寫好了{note}。上傳 YouTube 時也會帶入新的名稱和標籤建議。", { note: r.chapters >= 3 ? _("，共 {n} 章", { n: r.chapters }) : "" }), [], 6000);
   } catch (e) {
     if (state.id === id) showAlert(e.message);
   } finally {
@@ -546,7 +546,7 @@ async function rewriteDescription() {
 }
 $("#descStop").onclick = async () => { try { await post(`/api/projects/${state.id}/cancel`); } catch (e) { showAlert(e.message); } };
 $("#copyDesc").onclick = async () => {
-  try { await navigator.clipboard.writeText($("#descText").value); toast("已複製，可以貼到 YouTube 說明欄。", [], 3000); } catch { $("#descText").select(); }
+  try { await navigator.clipboard.writeText($("#descText").value); toast(_("已複製，可以貼到 YouTube 說明欄。"), [], 3000); } catch { $("#descText").select(); }
 };
 
 // ---- 分頁 ----
@@ -560,11 +560,11 @@ for (const t of document.querySelectorAll(".tabs button")) {
 async function loadCorr(refresh = false) {
   try {
     state.corr = await api(`/api/corrections${refresh ? "?refresh=1" : ""}`);
-  } catch (e) { $("#corrSrc").textContent = `讀不到錯字表：${e.message}`; return; }
+  } catch (e) { $("#corrSrc").textContent = _("讀不到錯字表：{err}", { err: e.message }); return; }
   const c = state.corr;
-  const src = { "meeting-scribe": "來自 mini（會議轉錄）", cache: "mini 連不上，這是本機快取", local: "本機正本", none: "還沒有錯字表" }[c.source] || c.source;
-  $("#corrSrc").textContent = `共 ${c.hints.length + c.fixed.length} 組，${src}。這份和會議轉錄共用：在這裡加的，開會轉錄也會用到。`;
-  $("#tabCorr").textContent = `錯字表 ${c.hints.length + c.fixed.length}`;
+  const src = { "meeting-scribe": _("來自 mini（會議轉錄）"), cache: _("mini 連不上，這是本機快取"), local: _("本機正本"), none: _("還沒有錯字表") }[c.source] || c.source;
+  $("#corrSrc").textContent = _("共 {n} 組，{src}。這份和會議轉錄共用：在這裡加的，開會轉錄也會用到。", { n: c.hints.length + c.fixed.length, src });
+  $("#tabCorr").textContent = _("錯字表 {count}", { count: c.hints.length + c.fixed.length });
   renderCorr();
 }
 function renderCorr() {

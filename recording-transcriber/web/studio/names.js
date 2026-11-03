@@ -26,13 +26,13 @@ function namesReset() {
 function showNamesBusy() {
   const on = Boolean(namesBusyId) && namesBusyId === state.id;
   $("#namesFind").disabled = Boolean(namesBusyId);
-  $("#namesFind").textContent = on ? "AI 正在找…（約一分鐘）" : "請 AI 找出來";
+  $("#namesFind").textContent = on ? _("AI 正在找…（約一分鐘）") : _("請 AI 找出來");
   $("#namesStop").hidden = !on;
 }
 
 async function namesFind() {
   const instruction = $("#namesIn").value.trim();
-  if (!instruction) { $("#namesNote").textContent = "先寫哪些名字或地名寫錯了，例如「B、C 都是 A」。"; $("#namesIn").focus(); return; }
+  if (!instruction) { $("#namesNote").textContent = _("先寫哪些名字或地名寫錯了，例如「B、C 都是 A」。"); $("#namesIn").focus(); return; }
   const id = state.id;
   await flushSave();   // AI 要看的是伺服器上的字幕：先把剛改的存進去
   namesBusyId = id;
@@ -62,11 +62,13 @@ function namesPreview(pairs, dropped) {
   const gone = pairs.length - namesPairs.length + dropped;
   if (!namesPairs.length) {
     $("#namesResult").hidden = true;
-    $("#namesNote").textContent = `AI 沒找到要改的地方${gone ? `（有 ${gone} 組在字幕裡找不到或不合規，已略過）` : ""}。可以把說明寫得更清楚一點再試。`;
+    const skip = gone ? _("（有 {n} 組在字幕裡找不到或不合規，已略過）", { n: gone }) : "";
+    $("#namesNote").textContent = _("AI 沒找到要改的地方{skip}。可以把說明寫得更清楚一點再試。", { skip });
     return;
   }
-  $("#namesNote").textContent = `找到 ${namesPairs.length} 組，勾選要改的${gone ? `（另有 ${gone} 組在字幕裡找不到或不合規，已略過）` : ""}。`;
-  $("#namesList").innerHTML = namesPairs.map((p, k) => `<li><input type="checkbox" data-k="${k}" checked aria-label="改這一組"><div class="head"><span class="wrong">${esc(p.wrong)}</span><span class="arrow">→</span><b>${esc(p.right)}</b><span class="muted">${p.count} 處</span></div>${p.ctx ? `<span class="ex">${p.ctx.before ? "…" : ""}${esc(p.ctx.before)}<mark>${esc(p.ctx.hit)}</mark>${esc(p.ctx.after)}${p.ctx.after ? "…" : ""}</span>` : ""}</li>`).join("");
+  const skipMore = gone ? _("（另有 {n} 組在字幕裡找不到或不合規，已略過）", { n: gone }) : "";
+  $("#namesNote").textContent = _("找到 {n} 組，勾選要改的{skip}。", { n: namesPairs.length, skip: skipMore });
+  $("#namesList").innerHTML = namesPairs.map((p, k) => `<li><input type="checkbox" data-k="${k}" checked aria-label="${_("改這一組")}"><div class="head"><span class="wrong">${esc(p.wrong)}</span><span class="arrow">→</span><b>${esc(p.right)}</b><span class="muted">${_("{n} 處", { n: p.count })}</span></div>${p.ctx ? `<span class="ex">${p.ctx.before ? "…" : ""}${esc(p.ctx.before)}<mark>${esc(p.ctx.hit)}</mark>${esc(p.ctx.after)}${p.ctx.after ? "…" : ""}</span>` : ""}</li>`).join("");
   $("#namesResult").hidden = false;
   namesApplyLabel();
 }
@@ -74,7 +76,7 @@ function namesPreview(pairs, dropped) {
 function namesApplyLabel() {
   const n = namesPairs.filter((p) => p.on).reduce((s, p) => s + p.count, 0);
   $("#namesApply").disabled = !n;
-  $("#namesApply").textContent = n ? `套用勾選的（${n} 處）` : "套用勾選的";
+  $("#namesApply").textContent = n ? _("套用勾選的（{n} 處）", { n }) : _("套用勾選的");
 }
 $("#namesList").onchange = (e) => {
   const box = e.target.closest?.("input[data-k]");
@@ -105,7 +107,7 @@ async function namesApply() {
     state.undo.pop();
     $("#undoBtn").disabled = !state.undo.length;
     namesClose();
-    showAlert(r.skipped ? "改完的句子會超過 200 字，沒有改。" : "字幕裡已經找不到這些錯字了，可能剛剛改過。");
+    showAlert(r.skipped ? _("改完的句子會超過 200 字，沒有改。") : _("字幕裡已經找不到這些錯字了，可能剛剛改過。"));
     return;
   }
   state.cues = r.cues;
@@ -113,17 +115,18 @@ async function namesApply() {
   renderList();
   showCue();
   drawOverlay();
-  const toCorr = $("#namesCorr").checked ? chosen.filter((_, k) => r.perPair[k] > 0) : [];
+  const toCorr = $("#namesCorr").checked ? chosen.filter((p0, k) => r.perPair[k] > 0) : [];
   namesClose();
   // 復原只認這一批：中間又改了別的，就不會誤把別的修改退掉
-  const back = [{ label: "復原", run: () => { if (state.undo[state.undo.length - 1] === mark) undo(); else showAlert("之後又改過字幕，請用上方的「復原」一步一步退。"); } }];
-  const done = `已改 ${r.count} 處${r.skipped ? `（${r.skipped} 句改完會超過 200 字，沒有改）` : ""}，改過的句子在「AI 改過」裡。`;
-  toast(`${done}${toCorr.length ? "正在加入錯字表…" : ""}`, back, 15000);
+  const back = [{ label: _("復原"), run: () => { if (state.undo[state.undo.length - 1] === mark) undo(); else showAlert(_("之後又改過字幕，請用上方的「復原」一步一步退。")); } }];
+  const done = r.skipped ? _("已改 {n} 處（{skipped} 句改完會超過 200 字，沒有改），改過的句子在「AI 改過」裡。", { n: r.count, skipped: r.skipped }) : _("已改 {n} 處，改過的句子在「AI 改過」裡。", { n: r.count });
+  const sp = UI_LANG === "en" ? " " : "";   // 英文句子之間要空格
+  toast(`${done}${toCorr.length ? sp + _("正在加入錯字表…") : ""}`, back, 15000);
   if (!toCorr.length) return;
   try {
     const c = await post("/api/corrections", { pairs: toCorr.map((p) => [p.wrong, p.right]) });
-    toast(`${done}${c.added ? `已加入錯字表 ${c.added} 組（共 ${c.hints + c.fixed} 組，存在 mini）。` : "錯字表裡都已經有了。"}`, back, 15000);
+    toast(`${done}${sp}${c.added ? _("已加入錯字表 {n} 組（共 {total} 組，存在 mini）。", { n: c.added, total: c.hints + c.fixed }) : _("錯字表裡都已經有了。")}`, back, 15000);
     loadCorr(true);
-  } catch (e) { showAlert(`字幕改好了，但錯字表沒加成功：${e.message}`); }
+  } catch (e) { showAlert(_("字幕改好了，但錯字表沒加成功：{err}", { err: e.message })); }
 }
 $("#namesApply").onclick = namesApply;

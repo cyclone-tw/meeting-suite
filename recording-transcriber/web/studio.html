@@ -12,6 +12,13 @@
 <link rel="stylesheet" href="/shared/md.css">
 <link rel="stylesheet" href="/shared/ext.css">
 <link rel="stylesheet" href="/shared/mindmap.css">
+<!-- 介面中英切換（#152）：翻譯引擎與字典。會議 App 的共用元件字典（/shared/lang-en.js）加上工作室自己的（/studio/lang-en.js）；
+     會議轉錄 App 的 checkout 不在時（/shared 404）就照中文 -->
+<script src="/shared/i18n.js"></script>
+<script src="/shared/lang-en.js"></script>
+<script src="/studio/lang-en.js"></script>
+<script src="/studio/i18n.js"></script>
+<style>html.i18n-wait body { visibility: hidden; }</style>
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -48,6 +55,7 @@
     <button class="btn" id="ytOpen" hidden title="上傳到 YouTube（需要的影片會先自動輸出）"><svg class="icon"><use href="#i-upload"/></svg><span class="yt-label-long">上傳 </span>YouTube</button>
     <button class="btn ghost" id="wikiOpen" hidden title="把字幕和說明欄整理成交接單，放到 iCloud 共用資料夾的 to-wiki，交給 coding agent 整理成筆記" aria-label="交給 agent 寫 wiki"><svg class="icon"><use href="#i-book"/></svg><span class="wiki-label">交給 agent 寫 wiki</span></button>
     <button class="btn ghost" id="settingsBtn" title="設定（YouTube 頻道、講者名冊）" aria-label="設定"><svg class="icon"><use href="#i-gear"/></svg><span class="hdr-label">設定</span></button>
+    <button class="btn ghost" id="langBtn" translate="no"></button>
     <button class="btn ghost" id="quitBtn" title="關閉字幕工作室（背景的服務也一起停掉）"><svg class="icon"><use href="#i-power"/></svg><span class="quit-label">關閉工作室</span></button>
   </span>
 </header>

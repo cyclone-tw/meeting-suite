@@ -4,6 +4,10 @@
 // 呼叫其他檔的函式要放在事件或函式裡，因為載入當下後面的檔還沒執行。
 // 這個檔：共用：API、提示、畫面切換、格式化。
 
+// 介面中英切換（#152）：靜態畫面照字典換字（i18n.js 決定了語言），換好才顯示
+I18N.translate(document.documentElement);
+document.documentElement.classList.remove("i18n-wait");
+
 const TOKEN = document.querySelector('meta[name="studio-token"]').content;
 // 伺服器設定好的選用功能（handoff、icloud），沒設定的按鈕不顯示
 const FEATURES = new Set((document.querySelector('meta[name="studio-features"]')?.content || "").split(/\s+/).filter(Boolean));
@@ -15,7 +19,8 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&
 async function api(path, opts = {}) {
   const r = await fetch(path, { ...opts, headers: { "X-Studio-Token": TOKEN, ...(opts.body ? { "Content-Type": "application/json" } : {}) } });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw Object.assign(new Error(j.error || `HTTP ${r.status}`), { status: r.status, busy: j.busy, handoff: j.handoff });
+  // 主機的錯誤訊息是中文：照字典換成介面的語言（I18N.msg 認得帶 {名稱} 的訊息，查不到照原樣）
+  if (!r.ok) throw Object.assign(new Error(j.error ? I18N.msg(j.error) : `HTTP ${r.status}`), { status: r.status, busy: j.busy, handoff: j.handoff });
   return j;
 }
 const post = (path, body = {}) => api(path, { method: "POST", body: JSON.stringify(body) });
@@ -67,7 +72,7 @@ function setView(v) {
   if (v !== "home") {
     homePosters?.abort();
     dlRun += 1;   // 改開了別的東西：不要等下載完又把畫面拉回預覽
-    if ($("#toast").textContent.includes("正在下載到這台電腦")) $("#toast").hidden = true;
+    if ($("#toast").textContent.includes(_("正在下載到這台電腦"))) $("#toast").hidden = true;
   }
   if (v === "home") { $("#projName").textContent = ""; $("#privBadge").hidden = true; }
 }
@@ -77,4 +82,4 @@ const fmtClock = (ms) => {
   return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
 };
 const fmtSize = (b) => (b > 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.round(b / 1e6)} MB`);
-const fmtDate = (ms) => new Date(ms).toLocaleString("zh-TW", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+const fmtDate = (ms) => new Date(ms).toLocaleString(UI_LANG === "en" ? "en-US" : "zh-TW", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });

@@ -537,7 +537,11 @@ test("a project without cuts keeps the old behaviour exactly", async (t) => {
 const pageScripts = () => {
   const html = fs.readFileSync(new URL("../web/studio.html", import.meta.url), "utf8");
   // /shared/ 是會議轉錄 App 的共用元件（#111），在那個 repo 測；這裡的頁面測試用假的代替
-  return [...html.matchAll(/<script\b([^>]*)><\/script>/g)].map((m) => ({ attrs: m[1], src: m[1].match(/src="([^"]+)"/)?.[1] })).filter((x) => !x.src?.startsWith("/shared/"));
+  // /studio/lang-en.js 是資料（字典）；/studio/i18n.js 在 <head> 先跑（#152），這裡排在 libs.mjs 後面、其他檔前面，順序一樣
+  const all = [...html.matchAll(/<script\b([^>]*)><\/script>/g)].map((m) => ({ attrs: m[1], src: m[1].match(/src="([^"]+)"/)?.[1] }))
+    .filter((x) => !x.src?.startsWith("/shared/") && x.src !== "/studio/lang-en.js");
+  const boot = all.filter((x) => x.src === "/studio/i18n.js"), rest = all.filter((x) => x.src !== "/studio/i18n.js");
+  return [rest[0], ...boot, ...rest.slice(1)];
 };
 
 test("the page scripts load in order without errors", async () => {
@@ -557,7 +561,9 @@ test("the page scripts load in order without errors", async () => {
   assert.match(libs, /^window\.shortOps = shortOps;$/m);
   const classic = list.slice(1);
   assert.ok(classic.length >= 5);
-  for (const x of classic) assert.match(x.attrs, /\bdefer\b/, `${x.src} 要 defer，才會排在 module 後面`);
+  assert.equal(classic[0].src, "/studio/i18n.js", "介面語言的設定要比其他頁面程式先跑（#152）");
+  assert.doesNotMatch(classic[0].attrs, /\bdefer\b/);
+  for (const x of classic.slice(1)) assert.match(x.attrs, /\bdefer\b/, `${x.src} 要 defer，才會排在 module 後面`);
   // 什麼都接得住的假 DOM：取任何屬性、呼叫都回自己，轉字串是空字串
   const stub = new Proxy(function () {}, {
     get: (_, k) => (k === Symbol.toPrimitive ? () => "" : k === "then" ? undefined : stub),

@@ -14,7 +14,7 @@ const tl = makeTimeline($("#tl"), {
 });
 const pNow = () => pvideo.currentTime * 1000;
 const tDur = () => trim.info?.duration_ms || (pvideo.duration || 0) * 1000;
-const fmtLen = (ms) => { const s = Math.round(ms / 1000); return s >= 3600 ? `${Math.floor(s / 3600)} 小時 ${Math.floor(s / 60) % 60} 分` : s >= 60 ? `${Math.floor(s / 60)} 分 ${s % 60} 秒` : `${s} 秒`; };
+const fmtLen = (ms) => { const s = Math.round(ms / 1000); return s >= 3600 ? _("{h} 小時 {m} 分", { h: Math.floor(s / 3600), m: Math.floor(s / 60) % 60 }) : s >= 60 ? _("{m} 分 {s} 秒", { m: Math.floor(s / 60), s: s % 60 }) : _("{s} 秒", { s }); };
 
 // 還在 iCloud 的影片：伺服器先請 iCloud 下載，這裡每 2 秒再問一次，下載好就進預覽（#20）
 async function openTrim(videoPath) {
@@ -25,13 +25,13 @@ async function openTrim(videoPath) {
     if (run !== dlRun) return;   // 下載中又點了別支，或按了取消
     if (!info.downloading) break;
     const waited = Math.round((Date.now() - began) / 1000);
-    const pct = info.progress > 0 ? `${Math.round(info.progress * 100)}%` : `已等 ${waited} 秒`;
-    const slow = waited >= 180 ? "<br>一直沒動的話，可以在 Finder 對這個檔案按右鍵，選「立即下載」。" : "";
-    toast(`「${esc(info.name)}」還在 iCloud，正在下載到這台電腦（${fmtSize(info.size)}，${pct}）…${slow}`, [{ label: "取消", run: () => { dlRun += 1; } }], 0);
+    const pct = info.progress > 0 ? `${Math.round(info.progress * 100)}%` : _("已等 {sec} 秒", { sec: waited });
+    const slow = waited >= 180 ? "<br>" + _("一直沒動的話，可以在 Finder 對這個檔案按右鍵，選「立即下載」。") : "";
+    toast(_("「{name}」還在 iCloud，正在下載到這台電腦（{size}，{pct}）…{slow}", { name: esc(info.name), size: fmtSize(info.size), pct, slow }), [{ label: _("取消"), run: () => { dlRun += 1; } }], 0);
     await new Promise((x) => setTimeout(x, 2000));
     if (run !== dlRun) return;
   }
-  if ($("#toast").textContent.includes("正在下載到這台電腦")) $("#toast").hidden = true;
+  if ($("#toast").textContent.includes(_("正在下載到這台電腦"))) $("#toast").hidden = true;
   leaveTrim();
   trim.ac = new AbortController();
   Object.assign(trim, { info, cuts: [], undo: [], selIn: null, selOut: null, picked: -1 });
@@ -43,16 +43,16 @@ async function openTrim(videoPath) {
   $("#langHint").hidden = true;
   trkShow(info.craig);   // 下載資料夾裡錄音時間對得上的 Discord 分軌（#129）
   subShow(info.subtitles);   // 影片旁邊同名的字幕檔（#148）
-  $("#tMeta").textContent = `${fmtLen(info.duration_ms)} · ${fmtSize(info.size)}${info.playable ? "" : " · 這種格式要先轉成瀏覽器能播的版本，第一次打開會慢一點"}`;
+  $("#tMeta").textContent = `${fmtLen(info.duration_ms)} · ${fmtSize(info.size)}${info.playable ? "" : " · " + _("這種格式要先轉成瀏覽器能播的版本，第一次打開會慢一點")}`;
   // 已經做過字幕的影片：這裡只能看；要剪輯到專案的編輯頁剪（#5）
   $("#tExisting").hidden = !info.project;
-  $("#tExistingText").textContent = { failed: "這支影片上次處理到一半失敗了，打開後按「重試」。", cancelled: "這支影片上次處理到一半停止了，打開後按「重新開始」。", processing: "這支影片正在處理中。" }[info.project_status] || "這支影片之前做過字幕，不用重新辨識。";
+  $("#tExistingText").textContent = { failed: _("這支影片上次處理到一半失敗了，打開後按「重試」。"), cancelled: _("這支影片上次處理到一半停止了，打開後按「重新開始」。"), processing: _("這支影片正在處理中。") }[info.project_status] || _("這支影片之前做過字幕，不用重新辨識。");
   $("#tStartBox").hidden = !!info.project;
   for (const id of ["#cutTools", "#trimKeys", "#tlHint"]) $(id).hidden = !!info.project;
   $("#tlEnd").textContent = ops.fmtTime(info.duration_ms);
   pvideo.src = `/api/preview/${info.id}/video?t=${TOKEN}`;
   tl.reset(info.duration_ms);
-  $("#zoomLabel").textContent = "整支";
+  $("#zoomLabel").textContent = _("整支");
   renderTrim();
   loadTiles(info.id, trim.ac.signal);
   api(`/api/preview/${info.id}/wave`).then((w) => {
@@ -86,18 +86,18 @@ function renderTrim() {
   tl.setCuts(trim.cuts, trim.picked);
   tl.setSel(sel, sel ? null : trim.selIn ?? trim.selOut);
   $("#cutSel").disabled = !sel;
-  $("#cutSel").textContent = sel ? `剪掉選取的範圍（${fmtLen(sel[1] - sel[0])}）` : "剪掉選取的範圍";
+  $("#cutSel").textContent = sel ? _("剪掉選取的範圍（{len}）", { len: fmtLen(sel[1] - sel[0]) }) : _("剪掉選取的範圍");
   $("#tUndo").disabled = !trim.undo.length;
   const c = trim.cuts[trim.picked];
   $("#cutNote").hidden = !c;
-  if (c) $("#cutNote").innerHTML = `剪掉的區段 ${ops.fmtTime(c.start, true)}–${ops.fmtTime(c.end, true)}（${fmtLen(c.end - c.start)}）${c.reason ? `：${esc(c.reason)}` : ""} <button class="btn sm" data-restore>恢復這段</button><button class="btn sm" data-try>從前面 3 秒試播</button>`;
+  if (c) $("#cutNote").innerHTML = `${_("剪掉的區段 {from}–{to}（{len}）", { from: ops.fmtTime(c.start, true), to: ops.fmtTime(c.end, true), len: fmtLen(c.end - c.start) })}${c.reason ? _("：{reason}", { reason: esc(c.reason) }) : ""} <button class="btn sm" data-restore>${_("恢復這段")}</button><button class="btn sm" data-try>${_("從前面 3 秒試播")}</button>`;
   const keep = cutOps.keepSegments(trim.cuts, dur), kept = cutOps.keptDuration(keep);
   const removed = dur - kept;
   $("#tSum").innerHTML = trim.cuts.length
-    ? `原片 ${fmtLen(dur)} → 剪完 <b>${fmtLen(kept)}</b><br><span class="muted">剪掉 ${trim.cuts.length} 段，共 ${fmtLen(removed)}；剪掉的部分不會送去辨識</span>`
-    : `原片 <b>${fmtLen(dur)}</b><br><span class="muted">還沒剪。不剪也可以直接開始，之後在編輯頁也能剪。</span>`;
-  $("#cutList").innerHTML = trim.cuts.map((x, i) => `<li><button class="t" data-pick="${i}">${ops.fmtTime(x.start)}–${ops.fmtTime(x.end)}</button><span class="why">${fmtLen(x.end - x.start)}${x.reason ? ` · ${esc(x.reason)}` : ""}</span><button class="btn sm ghost" data-unc="${i}">恢復</button></li>`).join("");
-  $("#costHint").textContent = kept > 0 && home.sub.mode === "file" ? "用字幕檔：不送辨識、沒有辨識費；說明欄走 Claude 訂閱。" : kept > 0 ? `辨識約 NT$${Math.max(0.1, (kept / 3600000) * 3).toFixed(1)}（Soniox，每小時約 NT$3），${$("#langSel").value === "zh" ? "校對" : "翻譯"}走 Claude 訂閱。` : "整支都剪掉了，至少要留一段。";
+    ? `${_("原片 {orig} → 剪完 {kept}", { orig: fmtLen(dur), kept: `<b>${fmtLen(kept)}</b>` })}<br><span class="muted">${_("剪掉 {n} 段，共 {len}；剪掉的部分不會送去辨識", { n: trim.cuts.length, len: fmtLen(removed) })}</span>`
+    : `${_("原片 {orig}", { orig: `<b>${fmtLen(dur)}</b>` })}<br><span class="muted">${_("還沒剪。不剪也可以直接開始，之後在編輯頁也能剪。")}</span>`;
+  $("#cutList").innerHTML = trim.cuts.map((x, i) => `<li><button class="t" data-pick="${i}">${ops.fmtTime(x.start)}–${ops.fmtTime(x.end)}</button><span class="why">${fmtLen(x.end - x.start)}${x.reason ? ` · ${esc(x.reason)}` : ""}</span><button class="btn sm ghost" data-unc="${i}">${_("恢復")}</button></li>`).join("");
+  $("#costHint").textContent = kept > 0 && home.sub.mode === "file" ? _("用字幕檔：不送辨識、沒有辨識費；說明欄走 Claude 訂閱。") : kept > 0 ? _("辨識約 NT${cost}（Soniox，每小時約 NT$3），{what}走 Claude 訂閱。", { cost: Math.max(0.1, (kept / 3600000) * 3).toFixed(1), what: $("#langSel").value === "zh" ? _("校對") : _("翻譯") }) : _("整支都剪掉了，至少要留一段。");
   refreshStart();
 }
 
@@ -121,10 +121,10 @@ pvideo.addEventListener("play", () => { setPPlay(); pLoop(); });
 pvideo.addEventListener("pause", () => { setPPlay(); pTick(); });
 pvideo.addEventListener("seeked", pTick);
 pvideo.addEventListener("loadedmetadata", () => { fitPStage(); pTick(); });
-pvideo.addEventListener("error", () => { if (trim.info && !$("#trim").hidden) showAlert("這支影片播不了：可能被移動、刪除，或格式瀏覽器不支援。"); });
+pvideo.addEventListener("error", () => { if (trim.info && !$("#trim").hidden) showAlert(_("這支影片播不了：可能被移動、刪除，或格式瀏覽器不支援。")); });
 function setPPlay() {
   $("#pPlay").innerHTML = `<svg class="icon"><use href="#i-${pvideo.paused ? "play" : "pause"}"/></svg>`;
-  $("#pPlay").setAttribute("aria-label", pvideo.paused ? "播放" : "暫停");
+  $("#pPlay").setAttribute("aria-label", pvideo.paused ? _("播放") : _("暫停"));
 }
 function fitPStage() {
   const w = pvideo.videoWidth || 16, h = pvideo.videoHeight || 9, wrap = $("#pStageWrap");
@@ -154,28 +154,28 @@ $("#cutSilence").onclick = async () => {
   if (!id) return;
   const b = $("#cutSilence");
   b.disabled = true;
-  b.textContent = "找靜音中…";
+  b.textContent = _("找靜音中…");
   try {
     const r = await api(`/api/preview/${id}/silence`);
     if (trim.info?.id !== id) return;
     const fresh = r.items.filter((x) => cutOps.cutShare(trim.cuts, x.start, x.end) < 0.9);
-    if (!fresh.length) { toast("沒有找到超過 2 秒的靜音。", [], 4000); return; }
+    if (!fresh.length) { toast(_("沒有找到超過 2 秒的靜音。"), [], 4000); return; }
     setCuts([...trim.cuts, ...fresh.map((x) => ({ start: x.start, end: x.end, by: "ai", reason: x.reason }))]);
-    toast(`剪掉了 ${fresh.length} 段靜音（共 ${fmtLen(fresh.reduce((n, x) => n + x.end - x.start, 0))}）。點紅色區段可以個別恢復。`, [{ label: "復原", run: trimUndo }], 9000);
-  } catch (e) { showAlert(`找靜音失敗：${e.message}`); } finally { b.disabled = false; b.textContent = "剪掉長時間的靜音"; }
+    toast(_("剪掉了 {n} 段靜音（共 {len}）。點紅色區段可以個別恢復。", { n: fresh.length, len: fmtLen(fresh.reduce((n, x) => n + x.end - x.start, 0)) }), [{ label: _("復原"), run: trimUndo }], 9000);
+  } catch (e) { showAlert(_("找靜音失敗：{msg}", { msg: e.message })); } finally { b.disabled = false; b.textContent = _("剪掉長時間的靜音"); }
 };
-$("#zoomIn").onclick = () => { const z = tl.zoom(1); $("#zoomLabel").textContent = z === 1 ? "整支" : `×${z}`; };
-$("#zoomOut").onclick = () => { const z = tl.zoom(-1); $("#zoomLabel").textContent = z === 1 ? "整支" : `×${z}`; };
+$("#zoomIn").onclick = () => { const z = tl.zoom(1); $("#zoomLabel").textContent = z === 1 ? _("整支") : `×${z}`; };
+$("#zoomOut").onclick = () => { const z = tl.zoom(-1); $("#zoomLabel").textContent = z === 1 ? _("整支") : `×${z}`; };
 $("#cutNote").onclick = (e) => {
   const c = trim.cuts[trim.picked];
   if (!c) return;
-  if (e.target.closest("[data-restore]")) setCuts(trim.cuts.filter((_, i) => i !== trim.picked));
+  if (e.target.closest("[data-restore]")) setCuts(trim.cuts.filter((x0, i) => i !== trim.picked));
   if (e.target.closest("[data-try]")) { pSeek(Math.max(0, c.start - 3000)); pvideo.play(); }
 };
 $("#cutList").onclick = (e) => {
   const p = e.target.closest("[data-pick]"), u = e.target.closest("[data-unc]");
   if (p) { trim.picked = Number(p.dataset.pick); trim.selIn = trim.selOut = null; pSeek(trim.cuts[trim.picked].start); renderTrim(); }
-  if (u) setCuts(trim.cuts.filter((_, i) => i !== Number(u.dataset.unc)));
+  if (u) setCuts(trim.cuts.filter((x0, i) => i !== Number(u.dataset.unc)));
 };
 $("#tOpenExisting").onclick = () => { const id = trim.info?.project; if (id) { leaveTrim(); openProject(id); } };
 document.addEventListener("keydown", (e) => {

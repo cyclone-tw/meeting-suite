@@ -39,7 +39,7 @@ async function refreshShorts(force = false) {
 
 const shCuts = () => cutOps.normalizeCuts(state.cuts);
 const shLen = (x) => shortOps.shortLength(x, state.cuts);
-const secText = (ms) => `${Math.round(ms / 1000)} 秒`;
+const secText = (ms) => _("{n} 秒", { n: Math.round(ms / 1000) });
 
 function renderShorts() {
   const busy = Boolean(sh.job) || sh.aiBusy;
@@ -50,31 +50,31 @@ function renderShorts() {
   $("#shList").hidden = aiRunning;
   $("#shAi").disabled = busy;
   $("#shAdd").disabled = aiRunning || sh.items.length >= shortOps.MAX_ITEMS;
-  $("#shAi").textContent = sh.items.length ? "請 AI 重新挑" : "請 AI 挑精華";
+  $("#shAi").textContent = sh.items.length ? _("請 AI 重新挑") : _("請 AI 挑精華");
   $("#shList").innerHTML = sh.items.map((x) => {
     const len = shLen(x), cutIn = shortOps.shortKeep(x, state.cuts).length > 1;
     const out = x.output;
     let status;
     if (exporting === x.id) {
       const pct = Math.round((sh.job.progress || 0) * 100);
-      status = `<progress max="1" value="${sh.job.progress || 0}"></progress><span>輸出中 ${pct}%</span><button class="btn sm" data-a="stop">停止</button>`;
+      status = `<progress max="1" value="${sh.job.progress || 0}"></progress><span>${_("輸出中 {pct}%", { pct })}</span><button class="btn sm" data-a="stop">${_("停止")}</button>`;
     } else {
       const parts = [];
-      if (out && out.fresh) parts.push(`<span class="ok">已輸出「${esc(out.file)}」</span>`);
-      else if (out) parts.push(`<span class="stale">片段或字幕改過了，要重新輸出才會更新</span>`);
-      else if (x.export?.status === "failed") parts.push(`<span class="err">沒輸出成功：${esc(x.export.error || "")}</span>`);
-      else if (x.export?.status === "cancelled") parts.push(`<span class="muted">已停止</span>`);
+      if (out && out.fresh) parts.push(`<span class="ok">${_("已輸出「{file}」", { file: esc(out.file) })}</span>`);
+      else if (out) parts.push(`<span class="stale">${_("片段或字幕改過了，要重新輸出才會更新")}</span>`);
+      else if (x.export?.status === "failed") parts.push(`<span class="err">${_("沒輸出成功：{msg}", { msg: esc(I18N.msg(x.export.error || "")) })}</span>`);
+      else if (x.export?.status === "cancelled") parts.push(`<span class="muted">${_("已停止")}</span>`);
       const again = out || x.export?.status === "failed";
-      parts.push(`<button class="btn sm${out?.fresh ? "" : " solid"}" data-a="export"${busy ? " disabled" : ""}>${again ? "重新輸出" : "輸出這段"}</button>`);
-      if (out) parts.push(`<button class="btn sm ghost" data-a="reveal"><svg class="icon"><use href="#i-folder"/></svg>在 Finder 顯示</button>`);
+      parts.push(`<button class="btn sm${out?.fresh ? "" : " solid"}" data-a="export"${busy ? " disabled" : ""}>${again ? _("重新輸出") : _("輸出這段")}</button>`);
+      if (out) parts.push(`<button class="btn sm ghost" data-a="reveal"><svg class="icon"><use href="#i-folder"/></svg>${_("在 Finder 顯示")}</button>`);
       status = parts.join("");
     }
-    const why = x.by === "ai" && x.reason ? `・<span class="why">AI：${esc(x.reason)}</span>` : "";
-    const long = len > shortOps.AI_TARGET_MAX_MS ? "（短片通常 90 秒內比較好看）" : "";
+    const why = x.by === "ai" && x.reason ? ` · <span class="why">${_("AI：{reason}", { reason: esc(x.reason) })}</span>` : "";
+    const long = len > shortOps.AI_TARGET_MAX_MS ? _("（短片通常 90 秒內比較好看）") : "";
     return `<li class="sh-item${x.id === sh.sel ? " sel" : ""}" data-id="${esc(x.id)}">
-  <div class="sh-row1"><span class="sh-n">${String(x.n).padStart(2, "0")}</span><input class="text-in" data-a="title" maxlength="${shortOps.TITLE_MAX}" value="${esc(x.title)}" placeholder="短片標題（會放在畫面上方）" aria-label="短片標題"><button class="btn sm" data-a="play" title="從頭播到尾"><svg class="icon"><use href="#i-play"/></svg>播放</button></div>
-  <div class="sh-meta">${fmtClock(x.start)}–${fmtClock(x.end)}・<b>${secText(len)}</b>${cutIn ? "（含剪輯）" : ""}${long}${why}</div>
-  <div class="sh-edges"><span class="grp"><span class="lbl">開頭</span><button class="btn sm" data-a="start" data-d="-1">早一句</button><button class="btn sm" data-a="start" data-d="1">晚一句</button></span><span class="grp"><span class="lbl">結尾</span><button class="btn sm" data-a="end" data-d="-1">早一句</button><button class="btn sm" data-a="end" data-d="1">晚一句</button></span><button class="btn sm ghost sh-del" data-a="del">刪掉</button></div>
+  <div class="sh-row1"><span class="sh-n">${String(x.n).padStart(2, "0")}</span><input class="text-in" data-a="title" maxlength="${shortOps.TITLE_MAX}" value="${esc(x.title)}" placeholder="${_("短片標題（會放在畫面上方）")}" aria-label="${_("短片標題")}"><button class="btn sm" data-a="play" title="${_("從頭播到尾")}"><svg class="icon"><use href="#i-play"/></svg>${_("播放")}</button></div>
+  <div class="sh-meta">${fmtClock(x.start)}–${fmtClock(x.end)} · <b>${secText(len)}</b>${cutIn ? _("（含剪輯）") : ""}${long}${why}</div>
+  <div class="sh-edges"><span class="grp"><span class="lbl">${_("開頭")}</span><button class="btn sm" data-a="start" data-d="-1">${_("早一句")}</button><button class="btn sm" data-a="start" data-d="1">${_("晚一句")}</button></span><span class="grp"><span class="lbl">${_("結尾")}</span><button class="btn sm" data-a="end" data-d="-1">${_("早一句")}</button><button class="btn sm" data-a="end" data-d="1">${_("晚一句")}</button></span><button class="btn sm ghost sh-del" data-a="del">${_("刪掉")}</button></div>
   <div class="sh-out">${status}</div>
 </li>`;
   }).join("");
@@ -148,7 +148,7 @@ async function saveShorts() {
       sh.items = r.shorts?.items || [];
       if (!typing) renderShorts();
     })
-    .catch((e) => showAlert(`片段沒存成功：${e.message}`))
+    .catch((e) => showAlert(_("片段沒存成功：{msg}", { msg: e.message })))
     .finally(() => { sh.saving = null; });
   await sh.saving;
 }
@@ -180,7 +180,7 @@ $("#shList").addEventListener("click", async (e) => {
     shVideo.play().catch(() => {});
   } else if (a === "start" || a === "end") {
     const next = shortOps.moveEdge(x, a, Number(b.dataset.d), state.cues, state.cuts);
-    if (!next) { showAlert(a === "start" ? "開頭沒辦法再移了（已經是第一句，或會變得太短）。" : "結尾沒辦法再移了（已經是最後一句，或會變得太短）。"); return; }
+    if (!next) { showAlert(a === "start" ? _("開頭沒辦法再移了（已經是第一句，或會變得太短）。") : _("結尾沒辦法再移了（已經是最後一句，或會變得太短）。")); return; }
     Object.assign(x, next);
     sh.sel = x.id;
     shChanged();
@@ -190,7 +190,7 @@ $("#shList").addEventListener("click", async (e) => {
     sh.items = sh.items.filter((y) => y.id !== x.id);
     if (sh.sel === x.id) sh.sel = sh.items[0]?.id || "";
     shChanged();
-    if (x.output) toast(`已經輸出的「${esc(x.output.file)}」還留在資料夾裡。`);
+    if (x.output) toast(_("已經輸出的「{file}」還留在資料夾裡。", { file: esc(x.output.file) }));
   } else if (a === "export") {
     await saveShorts();
     try { await post(`/api/projects/${state.id}/shorts/${x.id}/export`); } catch (e2) { showAlert(e2.message); return; }
@@ -205,7 +205,7 @@ $("#shList").addEventListener("click", async (e) => {
 
 $("#shAdd").onclick = () => {
   const r = shortOps.rangeFrom(shVideo.currentTime * 1000, state.cues, state.cuts);
-  if (!r) { showAlert("這個位置之後沒有字幕了，請先在影片上往前找一個地方。"); return; }
+  if (!r) { showAlert(_("這個位置之後沒有字幕了，請先在影片上往前找一個地方。")); return; }
   const n = Math.max(shortOps.nextN(sh.items), (state.p?.shorts?.max_n || 0) + 1);   // 伺服器存檔時會再確認
   const x = { id: `u${Date.now().toString(36)}`, n, title: "", reason: "", by: "user", ...r };
   sh.items = [...sh.items, x].sort((p, q) => p.start - q.start);
@@ -223,9 +223,9 @@ async function runShortsAi() {
     sh.items = r.shorts?.items || [];
     sh.sel = sh.items.find((x) => x.by === "ai" && !x.output)?.id || sh.items[0]?.id || "";
     if (sh.sel) shSelect(sh.sel);
-    if (r.added) toast(`AI 挑了 ${r.added} 段。可以先播放看看，改標題、調整開頭結尾，滿意了再輸出。`);
+    if (r.added) toast(_("AI 挑了 {n} 段。可以先播放看看，改標題、調整開頭結尾，滿意了再輸出。", { n: r.added }));
   } catch (e) {
-    if (e.status !== 409 || !/停止/.test(e.message)) showAlert(e.message);
+    if (e.status !== 409 || !/停止|stop/i.test(e.message)) showAlert(e.message);   // 不翻：比對伺服器的訊息（英文模式下已換成英文）
   } finally {
     sh.aiBusy = false;
     await refreshShorts(true);
@@ -234,7 +234,7 @@ async function runShortsAi() {
 $("#shAi").onclick = () => {
   const replace = sh.items.filter((x) => !x.output).length;
   if (!replace) { runShortsAi(); return; }
-  toast(`還沒輸出的 ${replace} 段會換成 AI 新挑的；已經輸出的會留著。`, [{ label: "重新挑", solid: true, run: runShortsAi }, { label: "先不要" }], 0);
+  toast(_("還沒輸出的 {n} 段會換成 AI 新挑的；已經輸出的會留著。", { n: replace }), [{ label: _("重新挑"), solid: true, run: runShortsAi }, { label: _("先不要") }], 0);
 };
 $("#shStop").onclick = () => post(`/api/projects/${state.id}/cancel`).catch((e) => showAlert(e.message));
 $("#shortsOpen").onclick = openShorts;

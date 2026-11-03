@@ -22,6 +22,7 @@
 <script>
 const UI_LANG = MeetingI18n.pick((() => { try { return localStorage.getItem("ms.lang"); } catch (e) { return null; } })(), navigator.languages || [navigator.language]);
 const I18N = MeetingI18n.create(UI_LANG, [window.MeetingLangEN || {}]);
+MeetingI18n.use(I18N);   // 共用元件（心智圖、延伸頁籤）經 MeetingI18n.t 用同一份翻譯（#201）
 const _ = I18N._;
 document.documentElement.lang = UI_LANG === "en" ? "en" : "zh-Hant";
 if (UI_LANG === "en") { document.documentElement.classList.add("i18n-wait"); setTimeout(() => document.documentElement.classList.remove("i18n-wait"), 3000); }
@@ -518,6 +519,7 @@ if (UI_LANG === "en") { document.documentElement.classList.add("i18n-wait"); set
         <label class="switch"><span class="txt"><b>逐字稿優化</b><small id="polishNote">AI 整理成好讀的版本：修錯字、斷句、刪口頭禪，不改意思。存檔時原稿附在後面。</small></span><input type="checkbox" id="polish" checked></label>
         <label class="switch"><span class="txt"><b>轉台灣繁體</b><small>把簡體或大陸用語轉成台灣用法</small></span><input type="checkbox" id="t2s" checked></label>
       </div>
+      <label class="field"><span>AI 產出語言</span><select id="aiLang"><option value="ui">跟介面</option><option value="zh" translate="no">中文</option><option value="en" translate="no">English</option></select><small>重點、總結、會議紀錄、心智圖、延伸用哪種語言寫；逐字稿照原本說的語言。會議開始後這場就不再變。</small></label>
       <label class="field"><span>常錯字對照</span><textarea id="corrHints" rows="5" placeholder="書上 → 學障" spellcheck="false"></textarea><small>一行一組「聽錯的字 → 正確的字」，AI 依上下文判斷要不要換；正確的字也會提示給轉錄引擎。各裝置共用，存在這台主機；有設定共用用詞筆記時，這裡加的可以收回筆記（recording-transcriber 的 vocab:harvest）。</small></label>
       <label class="field"><span>一定替換</span><textarea id="corrFixed" rows="2" placeholder="下周 → 下週" spellcheck="false"></textarea><small>不看上下文一律換，聽錯的字至少兩個字。</small></label>
       <p class="help" id="corrNote" aria-live="polite"></p>
@@ -769,9 +771,10 @@ for (const slot of document.querySelectorAll("i[data-icon]")) {
   const svg = window.MeetingIcons?.icon(slot.dataset.icon, { className: "icon" });   // 圖示檔沒載入就只留文字，不讓整頁壞掉
   if (svg) slot.replaceWith(svg); else slot.remove();
 }
-// 所有送往主機的請求都經過 api()：同源時是空字串，放 Cloudflare Pages 時是主機 API 的來源（#106）
+// 所有送往主機的請求都經過 api()：同源時是空字串，放 Cloudflare Pages 時是主機 API 的來源（#106）。
+// 英文介面加 lang=en，主機回的錯誤訊息與內建項目名稱就換成英文（#197）
 const API_BASE = (document.querySelector('meta[name="scribe-api"]')?.content || "").trim().replace(/\/+$/, "");
-const api = (path) => API_BASE + path;
+const api = (path, lang = UI_LANG) => API_BASE + path + (lang === "en" ? (path.includes("?") ? "&" : "?") + "lang=en" : "");
 // 頁面提示裡的主機名稱（#170）：主機在 /healthz 回自己的名稱（config 的 host_label），讀不到就說「主機」
 let hostName = _("主機");
 function renderHostName() { for (const e of document.querySelectorAll(".hostName")) e.textContent = hostName; }
@@ -848,6 +851,10 @@ const tidy = (s) => s.replace(/([。！？，；：、」』）])\s+/g, "$1");
 // 這場確定的名字更正 [[錯, 對]]（#130）：逐字稿的原始 token 不動，顯示與匯出時套用；AI 結果在套用當下直接改
 let nameFixes = [], fixesEpoch = "";
 let meetingContext = "";   // 會議說明（#185）：每送一段都附上、跟著暫存；AI 依它判斷誰在講話
+// AI 產出語言（#202）：設定記在 ms.aiLang（ui＝跟介面，預設）；新的一場開始時決定 meetingAiLang，整場固定、跟著暫存
+const aiLangPref = () => { const v = store.get("ms.aiLang", "ui"); return v === "zh" || v === "en" ? v : "ui"; };
+const aiLangNow = () => (aiLangPref() === "ui" ? UI_LANG : aiLangPref());
+let meetingAiLang = aiLangNow();
 let nfPairs = [], nfBusy = false, nfOpener = null;   // 更正名字視窗：AI 找到、還沒套用的 {wrong, right, on}；關掉時焦點回到打開它的按鈕
 const fixNames = (s) => { for (const [w, r] of nameFixes) if (s.includes(w)) s = s.split(w).join(r); return s; };
 const show = (s) => fixNames(tidy($("t2s").checked ? conv(s) : s));
@@ -1409,7 +1416,7 @@ async function postChunk(idx, start, end, text, seg = null) {
   const card = addCard(idx, start, end);
   Object.assign(chunks.get(idx), { start, end, text });
   // draft：結果由伺服器直接寫進這場的暫存（#126），這頁關掉或重新整理也不會丟
-  const mid = meetingId, payload = { meeting: mid, draft: draftId, idx, start, end, text, seg, polish: $("polish").checked, context: meetingContext, ...agendaPayload() };
+  const mid = meetingId, payload = { meeting: mid, draft: draftId, idx, start, end, text, seg, polish: $("polish").checked, context: meetingContext, ai_lang: meetingAiLang, ...agendaPayload() };
   try {
     const r = await sendPara(mid, payload);
     if (!r) throw new Error("offline");
@@ -1495,7 +1502,7 @@ async function backfillAi({ redo = false } = {}) {
   for (const [idx, c] of miss) {
     if (!fail) {
       const r = await sendPara(mid, { meeting: mid, draft: did, idx, start: c.start ?? 0, end: c.end ?? 0, text: c.text, seg: c.lastSegIdx ?? null,
-        polish: $("polish").checked, backfill: true, context: meetingContext, ...(redo ? { redo: true } : {}) });
+        polish: $("polish").checked, backfill: true, context: meetingContext, ai_lang: meetingAiLang, ...(redo ? { redo: true } : {}) });
       if (mid !== meetingId) return;   // 等待期間換了一場
       if (r && r.ok) { sent++; continue; }
       fail = r ? ((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`) : _("連不到伺服器");
@@ -2539,7 +2546,7 @@ async function resummarize() {
     const r = await fetch(api("/api/agent/summary"), {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Meeting-Scribe": "1" },
-      body: JSON.stringify({ meeting: mid, paras, context: meetingContext }),
+      body: JSON.stringify({ meeting: mid, paras, context: meetingContext, ai_lang: meetingAiLang }),
     });
     const j = await r.json().catch(() => ({}));
     if (mid !== meetingId) return;   // 等待期間已開始下一場，這份結果不要了
@@ -2605,7 +2612,7 @@ function renderMinutes() {
   note.className = "hint" + (minError ? " err" : "");
   if (minBusy) note.textContent = _("AI 正在整理會議紀錄…（約一分鐘）");
   else if (minError) note.textContent = _("會議紀錄失敗：{minError}。可以再按一次。", { minError });
-  else if (minutes) note.textContent = _("{title}｜{date}。待辦依期限排序；狀態可以直接改，複製和存 Drive 會照你改的。", { title: minutes.title, date: minutes.date });
+  else if (minutes) note.textContent = _("{title}｜{date}。待辦依期限排序；狀態可以直接改，複製和存 Drive 會照你改的。", { title: minTplName(minutes), date: minutes.date });
   else note.textContent = _("選模板後按「產生會議紀錄」：待辦（事項、負責人、期限、狀態）、決議、待釐清的問題。");
   // 送 Redmine 時不能重新產生：新紀錄會比送出結果先到，就記不到任務編號，下次多建一筆
   $("minGo").disabled = minBusy || rmBusy;
@@ -2692,7 +2699,7 @@ async function genMinutes() {
     const r = await fetch(api("/api/agent/summary"), {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Meeting-Scribe": "1" },
-      body: JSON.stringify({ meeting: mid, kind: "minutes", template: $("minTpl").value, date: localDate(startedAt ? new Date(startedAt) : new Date()), paras, context: meetingContext }),
+      body: JSON.stringify({ meeting: mid, kind: "minutes", template: $("minTpl").value, date: localDate(startedAt ? new Date(startedAt) : new Date()), paras, context: meetingContext, ai_lang: meetingAiLang }),
     });
     const j = await r.json().catch(() => ({}));
     if (mid !== meetingId) return;   // 等待期間已開始下一場，這份不要了
@@ -2705,6 +2712,10 @@ async function genMinutes() {
   }
 }
 
+// 畫面上的模板名稱：照模板清單（主機已依介面語言給名稱，#197）；清單裡沒有就用會議紀錄存的名稱（存檔內容不換）
+function minTplName(m) {
+  return [...$("minTpl").options].find((o) => o.value === m.template)?.textContent || m.title;
+}
 // 模板清單：本體的一般會議，加上擴充包提供的（例如特教會議教師版，#97）
 fetch(api("/api/templates")).then((r) => r.json()).then((j) => {
   const sel = $("minTpl"), list = j.templates || [];
@@ -3378,7 +3389,7 @@ async function genMindmap() {
     const r = await fetch(api("/api/agent/summary"), {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Meeting-Scribe": "1" },
-      body: JSON.stringify({ meeting: mid, kind: "mindmap", paras, context: meetingContext }),
+      body: JSON.stringify({ meeting: mid, kind: "mindmap", paras, context: meetingContext, ai_lang: meetingAiLang }),
     });
     const j = await r.json().catch(() => ({}));
     if (mid !== meetingId) return;   // 等待期間已開始下一場，這份不要了
@@ -3436,10 +3447,15 @@ function renderModules() {
     busy: modBusy, error: modError, loading: !modLoaded,
   });
 }
-// 存 Drive 時每份延伸一個檔（#157）：內容格式照 RecapFiles；檔名由伺服器照同一套規則取（server.py 的 extra_file_base）
+// 存 Drive 時每份延伸一個檔（#157）：內容格式照 RecapFiles；檔名由伺服器照同一套規則取（server.py 的 extra_file_base）。
+// 檔名與標題跟這場的 AI 產出語言走（#204），不跟畫面的介面語言：用那個語言的模組清單、那個語言的固定格式
+function fileLabel(m) {
+  const spec = (modCatalogs[meetingAiLang] || []).find((x) => x.id === m.module);
+  return spec ? ExtPanel.labelOf(spec, m.options, meetingAiLang) : m.title;
+}
 function moduleFiles() {
   const header = meetingHeader();
-  return modules.map((m) => ({ label: modLabel(m), markdown: RecapFiles.extraMarkdown({ label: modLabel(m), header, markdown: m.markdown }) }));
+  return modules.map((m) => { const label = fileLabel(m); return { label, markdown: RecapFiles.extraMarkdown({ label, header, markdown: m.markdown }) }; });
 }
 async function genModule(spec, options) {
   const mid = meetingId, paras = minutesParas();
@@ -3451,7 +3467,7 @@ async function genModule(spec, options) {
     const r = await fetch(api("/api/agent/module"), {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Meeting-Scribe": "1" },
-      body: JSON.stringify({ meeting: mid, module: spec.id, paras, options, context: meetingContext }),
+      body: JSON.stringify({ meeting: mid, module: spec.id, paras, options, context: meetingContext, ai_lang: meetingAiLang }),
     });
     const j = await r.json().catch(() => ({}));
     if (mid !== meetingId) return;   // 等待期間已開始下一場，這份不要了
@@ -3469,8 +3485,12 @@ async function genModule(spec, options) {
     if (mid === meetingId) { modBusy = null; renderModules(); }
   }
 }
+const markdownModules = (j) => (j.modules || []).filter((m) => m.output === "markdown" && Array.isArray(m.options));
+// 另一種語言的清單只給存檔取名用（#204）
+const modCatalogs = {};
+fetch(api("/api/modules", UI_LANG === "en" ? "zh" : "en")).then((r) => r.json()).then((j) => { modCatalogs[UI_LANG === "en" ? "zh" : "en"] = markdownModules(j); }).catch(() => {});
 fetch(api("/api/modules")).then((r) => r.json()).then((j) => {
-  modCatalog = (j.modules || []).filter((m) => m.output === "markdown" && Array.isArray(m.options));
+  modCatalog = modCatalogs[UI_LANG] = markdownModules(j);
   let opts = null;
   try { opts = JSON.parse(store.get("ms.module.options", "null")); } catch (e) { opts = null; }
   const last = modSpecOf(store.get("ms.module", ""));
@@ -3758,6 +3778,7 @@ async function start(cont = false) {
   continuing = cont;
   if (!cont) {
     setMeetingContext($("ctxSetup").value);
+    meetingAiLang = aiLangNow();
     meetingTitle = $("mtgTitle").value.trim() || `${localDate(new Date())} 會議`;   // 不翻：會議名稱會變成 Drive 資料夾與檔名
     meetingPlace = $("mtgPlace").value.trim();
   }
@@ -3883,6 +3904,8 @@ $("ai").checked = store.get("ms.ai", "1") === "1";
 $("ai").onchange = () => { store.set("ms.ai", $("ai").checked ? "1" : "0"); updatePolishNote(); };
 $("polish").checked = store.get("ms.polish", "1") === "1";
 $("polish").onchange = () => store.set("ms.polish", $("polish").checked ? "1" : "0");
+$("aiLang").value = aiLangPref();
+$("aiLang").onchange = () => store.set("ms.aiLang", $("aiLang").value);
 function updatePolishNote() {
   $("polishNote").textContent = $("ai").checked
     ? _("AI 整理成好讀的版本：修錯字、斷句、刪口頭禪，不改意思。存檔時原稿附在後面。")
@@ -4733,7 +4756,7 @@ function beginMeeting() {
 }
 
 function draftMeta(state) {
-  return { title: meetingTitle, place: meetingPlace, engine: engineNow, state, context: meetingContext,
+  return { title: meetingTitle, place: meetingPlace, engine: engineNow, state, context: meetingContext, ai_lang: meetingAiLang,
     started_at: Math.round(meetingStartedAt || Date.now()), duration_ms: Math.round(state === "done" ? totalMs : tOffset) };
 }
 
@@ -4927,6 +4950,7 @@ async function openDraft(id, btn) {
   draftSent = meta.tokens; draftFailed = false; audioFailed = false; audioChunks = []; audioMime = ""; audioSent = 0; audioDone = Promise.resolve();
   meetingTitle = meta.title || ""; meetingPlace = meta.place || "";
   setMeetingContext(typeof meta.context === "string" ? meta.context : "");
+  meetingAiLang = meta.ai_lang === "en" ? "en" : "zh";   // 舊暫存沒記：當時只有中文
   engineNow = typeof meta.engine === "string" ? meta.engine : "";   // 舊暫存沒記引擎：不猜，費用就不列
   totalMs = meta.duration_ms || (finals.length ? (finals[finals.length - 1].start || 0) : 0); tOffset = totalMs; durationMs = 0; startedAt = 0; meetingStartedAt = meta.started_at || 0;
   savedOk = false; continuing = false;

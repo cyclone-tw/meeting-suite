@@ -28,24 +28,24 @@
   const demote = (md) => String(md ?? "").replace(/^(#{1,5})(\s)/gm, "#$1$2");
 
   function headerLines({ name, place } = {}) {
-    return [name && `會議：${name}`, place && `地點：${place}`].filter(Boolean);
+    return [name && `會議：${name}`, place && `地點：${place}`].filter(Boolean);   // 不翻：存檔內容與讀回存檔的標記
   }
 
   function introText(intro, chapters) {
     const ch = Array.isArray(chapters) ? chapters : [];
-    return String(intro ?? "") + (ch.length ? "\n\n[ 分段章節 ]\n" + ch.map((c) => `${fmtHms(c.t_ms)} ${c.title}`).join("\n") : "");
+    return String(intro ?? "") + (ch.length ? "\n\n[ 分段章節 ]\n" + ch.map((c) => `${fmtHms(c.t_ms)} ${c.title}`).join("\n") : "");   // 不翻：存檔內容與讀回存檔的標記
   }
 
   function summaryMarkdown({ header = [], intro, chapters = [], full, short, transcript } = {}) {
-    return `# 會後總結\n\n${headBlock(header)}## 簡介\n\n${introText(intro, chapters)}\n\n## 完整總結\n\n${demote(full)}\n\n`
-      + `## 短總結\n\n${String(short ?? "")}\n\n## 逐字稿\n\n${String(transcript ?? "")}\n`;
+    return `# 會後總結\n\n${headBlock(header)}## 簡介\n\n${introText(intro, chapters)}\n\n## 完整總結\n\n${demote(full)}\n\n`   // 不翻：存檔內容與讀回存檔的標記
+      + `## 短總結\n\n${String(short ?? "")}\n\n## 逐字稿\n\n${String(transcript ?? "")}\n`;   // 不翻：存檔內容與讀回存檔的標記
   }
 
   // 檔名：不能用的字換成 _、拿掉開頭的點、最多 80 字（照字算，不是照 UTF-16），空的叫「延伸」
   function extraFileBase(label) {
     // 頭尾空白用明確的一組字（JS 的 trim 和 Python 的 strip 認得的字不一樣，server.py 用同一組）
     const name = String(label ?? "").replace(/^[ \t\n\r\f\v\u00a0\u3000\ufeff]+|[ \t\n\r\f\v\u00a0\u3000\ufeff]+$/g, "").replace(/[/\\:*?"<>|\u0000-\u001f]/g, "_").replace(/^\.+/, "");
-    return Array.from(name).slice(0, 80).join("") || "延伸";
+    return Array.from(name).slice(0, 80).join("") || "延伸";   // 不翻：存檔內容與讀回存檔的標記
   }
   const extraFileName = (label) => extraFileBase(label) + ".md";
 
@@ -84,8 +84,8 @@
     };
     const all = String(raw ?? "").replace(/^\ufeff/, "").replace(/\r\n?/g, "\n");
     // 優化逐字稿是 AI 改寫過的：有原始的就只讀原始
-    const mark = all.indexOf("【原始逐字稿】");
-    const lines = (mark >= 0 ? all.slice(mark + "【原始逐字稿】".length) : all).split("\n").map((l) => l.trim());
+    const mark = all.indexOf("【原始逐字稿】");   // 不翻：存檔內容與讀回存檔的標記
+    const lines = (mark >= 0 ? all.slice(mark + "【原始逐字稿】".length) : all).split("\n").map((l) => l.trim());   // 不翻：存檔內容與讀回存檔的標記
     const TS = /^\[(\d{2}:\d{2}:\d{2}|--:--:--)\] ?(.*)$/, SPK = /^\[講者 ([^\]]{1,20})\]$/;
     if (lines.some((l) => TS.test(l))) {
       let spk = null;

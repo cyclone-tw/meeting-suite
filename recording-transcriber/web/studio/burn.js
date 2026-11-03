@@ -37,14 +37,14 @@ async function refreshBurn() {
   if (running) {
     const x = p.job.progress || 0, secs = (Date.now() - p.job.started) / 1000;
     $("#burnBar").value = x;
-    $("#burnPct").textContent = `${Math.round(x * 100)}%${x > 0.03 ? `，大約還要 ${Math.max(1, Math.round((secs / x - secs) / 6) * 6)} 秒` : ""}　燒的時候可以繼續改字，但要燒完再燒一次才會更新。`;
+    $("#burnPct").textContent = _("{pct}%{eta}　燒的時候可以繼續改字，但要燒完再燒一次才會更新。", { pct: Math.round(x * 100), eta: x > 0.03 ? _("，大約還要 {n} 秒", { n: Math.max(1, Math.round((secs / x - secs) / 6) * 6) }) : "" });
     burnPoll = setTimeout(refreshBurn, 1000);
     return;
   }
-  const msg = { done: `燒好了（花了 ${b.seconds || "?"} 秒）。`, failed: `沒燒成功：${b.error || ""}`, cancelled: "已停止。" }[b.status] || "";
+  const msg = { done: _("燒好了（花了 {n} 秒）。", { n: b.seconds || "?" }), failed: _("沒燒成功：{msg}", { msg: I18N.msg(b.error || "") }), cancelled: _("已停止。") }[b.status] || "";
   $("#burnMsg").textContent = msg;
   $("#burnMsg").style.color = b.status === "failed" ? "var(--warn)" : "";
-  $("#burnStart").textContent = b.output ? "重新輸出一次" : burnKind === "cut" ? "開始輸出" : "開始燒字幕";
+  $("#burnStart").textContent = b.output ? _("重新輸出一次") : burnKind === "cut" ? _("開始輸出") : _("開始燒字幕");
 }
 $("#burnOpen").onclick = openBurn;
 $("#sizeSeg").onclick = (e) => {
@@ -69,13 +69,14 @@ let burnKind = "burn";
 function renderOutKind() {
   for (const b of document.querySelectorAll("#outSeg button")) b.setAttribute("aria-pressed", String(b.dataset.o === burnKind));
   const kept = cutOps.keptDuration(cutOps.keepSegments(pCuts(), state.p.duration_ms || 0));
-  const file = burnKind === "cut" ? `${state.p.name}-剪輯.mp4` : `${state.p.name}-字幕.mp4`;
+  const file = burnKind === "cut" ? `${state.p.name}-剪輯.mp4` : `${state.p.name}-字幕.mp4`;   // 不翻：實際的檔名
+  const folder = `${state.p.name}-字幕`;   // 不翻：實際的資料夾名稱
   const plain = burnKind === "cut" && !pCuts().length;   // 沒剪輯又不燒字幕：原片就是成品（#39）
   $("#burnWhere").textContent = plain
-    ? `沒有剪輯，原始影片就是不燒字幕的版本，不用另外輸出。字幕檔（SRT）已經存在影片旁邊的「${state.p.name}-字幕」資料夾，上傳 YouTube 時當 CC 字幕，觀眾可以自己開關。`
-    : `會存成「${file}」，放在影片旁邊的「${state.p.name}-字幕」資料夾。SRT 和說明欄已經自動存在同一個資料夾。` +
-      (burnKind === "cut" ? "字幕不燒進畫面，上傳 YouTube 時另外附上 SRT 當 CC 字幕，觀眾可以自己開關。" : "") +
-      (pCuts().length ? `會剪掉 ${pCuts().length} 段，剪完長 ${fmtLen(kept)}；SRT 和說明欄的章節時間已經換算成剪完的時間。` : "");
+    ? _("沒有剪輯，原始影片就是不燒字幕的版本，不用另外輸出。字幕檔（SRT）已經存在影片旁邊的「{folder}」資料夾，上傳 YouTube 時當 CC 字幕，觀眾可以自己開關。", { folder })
+    : _("會存成「{file}」，放在影片旁邊的「{folder}」資料夾。SRT 和說明欄已經自動存在同一個資料夾。", { file, folder }) +
+      (burnKind === "cut" ? _("字幕不燒進畫面，上傳 YouTube 時另外附上 SRT 當 CC 字幕，觀眾可以自己開關。") : "") +
+      (pCuts().length ? _("會剪掉 {n} 段，剪完長 {len}；SRT 和說明欄的章節時間已經換算成剪完的時間。", { n: pCuts().length, len: fmtLen(kept) }) : "");
   $("#burnStart").dataset.plain = plain ? "1" : "";
   if (!$("#burnRun").hidden) return;
   $("#burnStart").hidden = plain;
@@ -83,7 +84,7 @@ function renderOutKind() {
   $("#styleSeg").hidden = burnKind === "cut";
   $("#burnLangSeg").hidden = burnKind === "cut" || !state.foreign;
   $("#styleSeg").previousElementSibling.hidden = burnKind === "cut";
-  $("#burnTitle").textContent = burnKind === "cut" ? "輸出不燒字幕的影片" : "把字幕燒進影片";
+  $("#burnTitle").textContent = burnKind === "cut" ? _("輸出不燒字幕的影片") : _("把字幕燒進影片");
 }
 $("#burnLangSeg").onclick = (e) => { const b = e.target.closest("button[data-m]"); if (b) setLangMode(b.dataset.m); };
 // 雙語 ASS 字幕檔（#56）：給播放器外掛字幕用，存在專案資料夾
@@ -91,7 +92,7 @@ $("#assExport").onclick = async () => {
   await flushSave();
   try {
     const r = await post(`/api/projects/${state.id}/subtitle-file`);
-    toast(`已匯出「${esc(r.file)}」，在 Finder 打開了。用 IINA 或 VLC 播影片時把它拖進去，就有雙語字幕。`, [], 8000);
+    toast(_("已匯出「{file}」，在 Finder 打開了。用 IINA 或 VLC 播影片時把它拖進去，就有雙語字幕。", { file: esc(r.file) }), [], 8000);
   } catch (e) { showAlert(e.message); }
 };
 $("#outSeg").onclick = (e) => {

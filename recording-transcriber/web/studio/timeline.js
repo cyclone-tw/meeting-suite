@@ -55,10 +55,10 @@ function makeTimeline(root, on) {
     } else {
       w.fillStyle = css("--muted");
       w.font = "12px -apple-system, sans-serif";
-      w.fillText(t.wave ? "這支影片沒有聲音" : "讀取聲音波形…", 8, WAVE_H / 2 + 4);
+      w.fillText(t.wave ? _("這支影片沒有聲音") : _("讀取聲音波形…"), 8, WAVE_H / 2 + 4);
     }
     if (hintsBox) hintsBox.innerHTML = t.hints.map((h) => `<div style="left:${xOf(h.start)}px;width:${Math.max(2, xOf(h.end) - xOf(h.start))}px"></div>`).join("");
-    cutsBox.innerHTML = t.cuts.map((c, i) => `<div data-cut="${i}" class="${c.by === "ai" ? "ai" : ""}${i === t.picked ? " sel" : ""}" style="left:${xOf(c.start)}px;width:${Math.max(2, xOf(c.end) - xOf(c.start))}px" title="${esc(c.reason || "剪掉的區段")}：點一下可以恢復"></div>`).join("");
+    cutsBox.innerHTML = t.cuts.map((c, i) => `<div data-cut="${i}" class="${c.by === "ai" ? "ai" : ""}${i === t.picked ? " sel" : ""}" style="left:${xOf(c.start)}px;width:${Math.max(2, xOf(c.end) - xOf(c.start))}px" title="${_("{reason}：點一下可以恢復", { reason: esc(c.reason || _("剪掉的區段")) })}"></div>`).join("");
     selBox.hidden = !t.sel;
     if (t.sel) Object.assign(selBox.style, { left: `${xOf(t.sel[0])}px`, width: `${xOf(t.sel[1]) - xOf(t.sel[0])}px` });
     markBox.hidden = t.mark === null || !!t.sel;

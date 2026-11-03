@@ -29,15 +29,15 @@ function showProcessing(p) {
   setStep(3);
   const stopped = p.status === "cancelled";   // 使用者按了停止（#67）
   const failed = p.status === "failed" || stopped;
-  $("#procTitle").textContent = stopped ? "已經停止" : failed ? "處理沒有完成" : "正在自動辨識與校對";
+  $("#procTitle").textContent = stopped ? _("已經停止") : failed ? _("處理沒有完成") : _("正在自動辨識與校對");
   $("#procSub").hidden = failed;
   $("#procFail").hidden = !failed;
   $("#procRun").hidden = failed || !p.job;
-  $("#retryBtn").textContent = stopped ? "重新開始" : "重試";
+  $("#retryBtn").textContent = stopped ? _("重新開始") : _("重試");
   $("#procError").style.color = stopped ? "inherit" : "var(--warn)";
   $("#procError").textContent = stopped
-    ? `停在「${stepName(p.stopped_at)}」。按「重新開始」從頭再跑${p.has_asr ? "；辨識結果已經存下來，不用再付辨識費" : ""}。`
-    : p.error || "";
+    ? _("停在「{step}」。按「重新開始」從頭再跑{note}。", { step: stepName(p.stopped_at), note: p.has_asr ? _("；辨識結果已經存下來，不用再付辨識費") : "" })
+    : p.error ? I18N.msg(p.error) : "";
   const step = p.job?.step || "";
   const at = STEP_ORDER.indexOf(step);
   for (const li of document.querySelectorAll("#procSteps li")) {
@@ -50,7 +50,7 @@ function showProcessing(p) {
     li.classList.toggle("done", !failed && at > k);
     li.querySelector("i").textContent = !failed && at > k ? "✓" : "";
   }
-  $("#procElapsed").textContent = p.job ? `已經過 ${Math.round((Date.now() - p.job.started) / 1000)} 秒` : "";
+  $("#procElapsed").textContent = p.job ? _("已經過 {sec} 秒", { sec: Math.round((Date.now() - p.job.started) / 1000) }) : "";
   if (!failed) pollTimer = setTimeout(() => openProject(state.id), 1500);
 }
 // 重新處理做好的專案（#30）：有存著的辨識結果就不再送 Soniox
@@ -59,32 +59,32 @@ $("#reprocBtn").onclick = () => {
   const p = state.p;
   const usd = Math.max(0.01, ((p?.duration_ms || 0) / 3600000) * 0.10).toFixed(2);
   reprocMode = "reprocess";
-  $("#reprocTitle").textContent = "重新處理這支影片？";
+  $("#reprocTitle").textContent = _("重新處理這支影片？");
   $("#reprocCost").textContent = p?.has_asr
-    ? "這支影片的辨識結果還留著，不會再送 Soniox，也不用再付辨識費。"
-    : `這支影片沒有留下辨識結果，會重新送 Soniox 辨識（約 US$${usd}）。之後的結果會留著，下次重新處理就不用再付。`;
-  $("#reprocWhat").innerHTML = "會重新對時間、斷句、跑 AI 校對和 YouTube 說明欄。<b>目前的字幕和你改過的地方都會被取代</b>；剪輯的段落會保留。";
-  $("#reprocGo").textContent = "重新處理";
+    ? _("這支影片的辨識結果還留著，不會再送 Soniox，也不用再付辨識費。")
+    : _("這支影片沒有留下辨識結果，會重新送 Soniox 辨識（約 US${usd}）。之後的結果會留著，下次重新處理就不用再付。", { usd });
+  $("#reprocWhat").innerHTML = _("會重新對時間、斷句、跑 AI 校對和 YouTube 說明欄。{warn}；剪輯的段落會保留。", { warn: `<b>${_("目前的字幕和你改過的地方都會被取代")}</b>` });
+  $("#reprocGo").textContent = _("重新處理");
   $("#reprocDlg").showModal();
 };
 // 重新排字幕（#33）：只用每個字的時間重新斷句，不花錢、幾秒就好
 $("#relayoutBtn").onclick = () => {
-  if (!state.p?.has_timing) { showAlert("這支影片沒有每個字的時間，請用「重新處理這支影片」。"); return; }
+  if (!state.p?.has_timing) { showAlert(_("這支影片沒有每個字的時間，請用「重新處理這支影片」。")); return; }
   reprocMode = "relayout";
-  $("#reprocTitle").textContent = "重新排字幕？";
-  $("#reprocCost").textContent = "只用已經有的每個字的時間重新斷句：不重新辨識、不跑 AI，不花錢，幾秒就好。";
-  $("#reprocWhat").innerHTML = "字幕的文字不變，只是分句的位置會重新排。<b>你手動改過的字和時間會被取代</b>；剪輯的段落和「AI 改過」的標記會保留。";
-  $("#reprocGo").textContent = "重新排字幕";
+  $("#reprocTitle").textContent = _("重新排字幕？");
+  $("#reprocCost").textContent = _("只用已經有的每個字的時間重新斷句：不重新辨識、不跑 AI，不花錢，幾秒就好。");
+  $("#reprocWhat").innerHTML = _("字幕的文字不變，只是分句的位置會重新排。{warn}；剪輯的段落和「AI 改過」的標記會保留。", { warn: `<b>${_("你手動改過的字和時間會被取代")}</b>` });
+  $("#reprocGo").textContent = _("重新排字幕");
   $("#reprocDlg").showModal();
 };
 // 只重新寫說明欄（#46）：字幕不動；說明欄有內容時先確認，因為會被取代
 $("#descRedo").onclick = () => {
   if (!state.desc.trim()) { rewriteDescription(); return; }
   reprocMode = "describe";
-  $("#reprocTitle").textContent = "重新寫 YouTube 說明欄？";
-  $("#reprocCost").textContent = "會請 AI 依目前的字幕重新寫簡介、章節和每章重點，也會重新建議影片名稱和標籤。字幕不會變動，大約一分鐘。";
-  $("#reprocWhat").innerHTML = "<b>目前說明欄的內容會被取代</b>，包括你手動改過的地方。";
-  $("#reprocGo").textContent = "重新寫";
+  $("#reprocTitle").textContent = _("重新寫 YouTube 說明欄？");
+  $("#reprocCost").textContent = _("會請 AI 依目前的字幕重新寫簡介、章節和每章重點，也會重新建議影片名稱和標籤。字幕不會變動，大約一分鐘。");
+  $("#reprocWhat").innerHTML = _("{warn}，包括你手動改過的地方。", { warn: `<b>${_("目前說明欄的內容會被取代")}</b>` });
+  $("#reprocGo").textContent = _("重新寫");
   $("#reprocDlg").showModal();
 };
 $("#reprocCancel").onclick = () => $("#reprocDlg").close();
@@ -95,14 +95,14 @@ $("#reprocGo").onclick = async () => {
     await flushSave();
     const r = await post(`/api/projects/${state.id}/${reprocMode}`);
     await openProject(state.id);
-    if (reprocMode === "relayout") toast(`重新排好了，共 ${r.cues} 句。`, [], 5000);
+    if (reprocMode === "relayout") toast(_("重新排好了，共 {n} 句。", { n: r.cues }), [], 5000);
   } catch (e) { showAlert(e.message); }
 };
 
 // 停在哪一步：用處理畫面上那一步的文字，去掉括號裡的說明
 function stepName(k) {
   const li = document.querySelector(`#procSteps li[data-k="${k}"]`);
-  return li ? li.textContent.replace(/（.*）/, "").trim() : "處理中";
+  return li ? li.textContent.replace(/[（(].*[）)]/, "").trim() : _("處理中");   // 不翻：正規式（全形與半形括號都去掉）
 }
 
 $("#procStop").onclick = () => $("#stopDlg").showModal();
@@ -112,7 +112,7 @@ $("#stopGo").onclick = async () => {
   $("#procStop").disabled = true;
   try {
     await post(`/api/projects/${state.id}/cancel`);
-    toast("正在停止，雲端的副本會一起刪掉。", [], 5000);
+    toast(_("正在停止，雲端的副本會一起刪掉。"), [], 5000);
   } catch (e) { showAlert(e.message); }
   finally { $("#procStop").disabled = false; }
 };
@@ -158,7 +158,7 @@ function showEditor(p) {
   for (const x of p.suggestions?.items || []) aiChecked.add(x.id);
   renderAi(p);
   footNote(p.report);
-  $("#saveNote").textContent = p.updated ? `已儲存 ${new Date(p.updated).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" })}` : "";
+  $("#saveNote").textContent = p.updated ? _("已儲存 {time}", { time: new Date(p.updated).toLocaleTimeString(UI_LANG === "en" ? "en-US" : "zh-TW", { hour: "2-digit", minute: "2-digit" }) }) : "";
   loadCorr();
   if (p.burn?.status === "running") openBurn();
 }
@@ -197,13 +197,13 @@ function renderTranslate(p) {
   const missing = state.cues.filter((c) => c.text.trim() && !String(c.tr || "").trim()).length;
   $("#trStop").hidden = !running;
   $("#trBtn").disabled = Boolean(p.job);
-  $("#trBtn").textContent = missing && missing < state.cues.length ? "翻譯沒翻的…" : "翻譯…";
+  $("#trBtn").textContent = missing && missing < state.cues.length ? _("翻譯沒翻的…") : _("翻譯…");
   let msg = "";
-  if (running) msg = `翻譯中 ${t?.done || 0}／${t?.total || "…"} 句，可以先看、先改`;
-  else if (t?.status === "failed") msg = `翻譯沒完成：${t.error || ""}`;
-  else if (t?.status === "cancelled") msg = `翻譯停在 ${t.done || 0}／${t.total || 0} 句`;
-  else if (missing) msg = `${missing} 句還沒有譯文`;
-  else if (state.cues.length) msg = "每句都有譯文";
+  if (running) msg = _("翻譯中 {done}／{total} 句，可以先看、先改", { done: t?.done || 0, total: t?.total || "…" });
+  else if (t?.status === "failed") msg = _("翻譯沒完成：{err}", { err: t.error ? I18N.msg(t.error) : "" });
+  else if (t?.status === "cancelled") msg = _("翻譯停在 {done}／{total} 句", { done: t.done || 0, total: t.total || 0 });
+  else if (missing) msg = _("{n} 句還沒有譯文", { n: missing });
+  else if (state.cues.length) msg = _("每句都有譯文");
   $("#trStatus").textContent = msg;
   $("#trStatus").style.color = !running && t?.status === "failed" ? "var(--warn)" : "";
   if (running) trPoll = setTimeout(pollTranslate, 2000);
@@ -226,7 +226,7 @@ async function pollTranslate() {
   if (n) { showCue(); drawOverlay(); }
   const wasRunning = state.p?.job?.kind === "translate";
   state.p = { ...state.p, translate: p.translate, job: p.job };
-  if (wasRunning && !p.job && p.translate?.status === "done") toast(`翻譯好了，共 ${p.translate.done} 句。上面可以切換「中文／原文／雙語」。`, [], 6000);
+  if (wasRunning && !p.job && p.translate?.status === "done") toast(_("翻譯好了，共 {n} 句。上面可以切換「中文／原文／雙語」。", { n: p.translate.done }), [], 6000);
   renderTranslate(state.p);
 }
 async function startTranslate(all) {
@@ -242,9 +242,9 @@ $("#trBtn").onclick = () => {
   const have = state.cues.filter((c) => String(c.tr || "").trim()).length;
   if (!have) { startTranslate(false); return; }
   const actions = [];
-  if (missing) actions.push({ label: `只翻沒翻的 ${missing} 句`, solid: true, run: () => startTranslate(false) });
-  actions.push({ label: "全部重翻", solid: !missing, run: () => startTranslate(true) }, { label: "先不要" });
-  toast(missing ? "要翻哪些？全部重翻會取代目前的譯文，包括你改過的。" : "每句都有譯文了。全部重翻會取代目前的譯文，包括你改過的。", actions, 0);
+  if (missing) actions.push({ label: _("只翻沒翻的 {n} 句", { n: missing }), solid: true, run: () => startTranslate(false) });
+  actions.push({ label: _("全部重翻"), solid: !missing, run: () => startTranslate(true) }, { label: _("先不要") });
+  toast(missing ? _("要翻哪些？全部重翻會取代目前的譯文，包括你改過的。") : _("每句都有譯文了。全部重翻會取代目前的譯文，包括你改過的。"), actions, 0);
 };
 $("#trStop").onclick = async () => { try { await post(`/api/projects/${state.id}/cancel`); } catch (e) { showAlert(e.message); } };
 
@@ -256,13 +256,13 @@ function renderScrubCuts() {
 }
 
 function footNote(r) {
-  if (!r) { $("#listFoot").textContent = `${state.cues.length} 句${pCuts().length ? ` · 剪掉 ${pCuts().length} 段` : ""}`; return; }
-  const parts = [`${state.cues.length} 句`];
-  if (r.edits) parts.push(`AI 改了 ${r.edits.applied} 處`);
-  if (r.soniox?.audio_ms) parts.push(`Soniox ${(r.soniox.audio_ms / 60000).toFixed(1)} 分鐘 ≈ NT$${(r.soniox.cost_usd * 32).toFixed(1)}`);
-  if (r.claude?.calls) parts.push(r.proofreader === "claude" ? `Claude ${r.claude.calls} 次（訂閱，API 等值 NT$${(r.claude.cost_usd * 32).toFixed(1)}）` : `${r.proofreader} ${r.claude.calls} 次`);
-  if (r.corrections) parts.push(`錯字表 ${r.corrections.hints + r.corrections.fixed} 組${r.corrections.source === "cache" ? "（mini 連不上，用本機快取）" : ""}`);
-  if (pCuts().length) parts.push(`剪掉 ${pCuts().length} 段（紅色），燒字幕時一起剪掉`);
+  if (!r) { $("#listFoot").textContent = _("{n} 句", { n: state.cues.length }) + (pCuts().length ? " · " + _("剪掉 {n} 段", { n: pCuts().length }) : ""); return; }
+  const parts = [_("{n} 句", { n: state.cues.length })];
+  if (r.edits) parts.push(_("AI 改了 {n} 處", { n: r.edits.applied }));
+  if (r.soniox?.audio_ms) parts.push(_("Soniox {min} 分鐘 ≈ NT${cost}", { min: (r.soniox.audio_ms / 60000).toFixed(1), cost: (r.soniox.cost_usd * 32).toFixed(1) }));
+  if (r.claude?.calls) parts.push(r.proofreader === "claude" ? _("Claude {n} 次（訂閱，API 等值 NT${cost}）", { n: r.claude.calls, cost: (r.claude.cost_usd * 32).toFixed(1) }) : _("{name} {n} 次", { name: r.proofreader, n: r.claude.calls }));
+  if (r.corrections) parts.push(_("錯字表 {n} 組{note}", { n: r.corrections.hints + r.corrections.fixed, note: r.corrections.source === "cache" ? _("（mini 連不上，用本機快取）") : "" }));
+  if (pCuts().length) parts.push(_("剪掉 {n} 段（紅色），燒字幕時一起剪掉", { n: pCuts().length }));
   $("#listFoot").textContent = parts.join(" · ");
 }
 
@@ -278,7 +278,7 @@ function fitStage() {
 new ResizeObserver(fitStage).observe($("#stageWrap"));
 window.addEventListener("resize", fitStage);
 video.addEventListener("loadedmetadata", () => { fitStage(); renderScrubCuts(); tick(); });
-video.addEventListener("error", () => { if (state.id && !$("#editor").hidden) showAlert("影片播不了：原始影片可能被移動、刪除，或格式瀏覽器不支援。"); });
+video.addEventListener("error", () => { if (state.id && !$("#editor").hidden) showAlert(_("影片播不了：原始影片可能被移動、刪除，或格式瀏覽器不支援。")); });
 
 // ---- 編輯頁的時間軸與剪輯（#5）----
 const ed = { selIn: null, selOut: null, picked: -1, ac: null };
@@ -295,7 +295,7 @@ function openEditorTimeline(p) {
   ed.ac = new AbortController();
   Object.assign(ed, { selIn: null, selOut: null, picked: -1 });
   etl.reset(eDur() || 1);
-  $("#eZoomLabel").textContent = "整支";
+  $("#eZoomLabel").textContent = _("整支");
   $("#etlEnd").textContent = ops.fmtTime(eDur());
   renderECuts();
   const id = p.id, signal = ed.ac.signal;
@@ -312,10 +312,10 @@ function renderECuts() {
   etl.setCuts(state.cuts, ed.picked);
   etl.setSel(sel, sel ? null : ed.selIn ?? ed.selOut);
   $("#eCutSel").disabled = !sel;
-  $("#eCutSel").textContent = sel ? `剪掉選取的範圍（${fmtLen(sel[1] - sel[0])}）` : "剪掉選取的範圍";
+  $("#eCutSel").textContent = sel ? _("剪掉選取的範圍（{len}）", { len: fmtLen(sel[1] - sel[0]) }) : _("剪掉選取的範圍");
   const c = state.cuts[ed.picked];
   $("#eCutNote").hidden = !c;
-  if (c) $("#eCutNote").innerHTML = `剪掉的區段 ${ops.fmtTime(c.start, true)}–${ops.fmtTime(c.end, true)}（${fmtLen(c.end - c.start)}）${c.reason ? `：${esc(c.reason)}` : ""} <button class="btn sm" data-restore>恢復這段</button><button class="btn sm" data-try>從前面 3 秒試播</button>`;
+  if (c) $("#eCutNote").innerHTML = `${_("剪掉的區段 {from}–{to}（{len}）", { from: ops.fmtTime(c.start, true), to: ops.fmtTime(c.end, true), len: fmtLen(c.end - c.start) })}${c.reason ? _("：{reason}", { reason: esc(c.reason) }) : ""} <button class="btn sm" data-restore>${_("恢復這段")}</button><button class="btn sm" data-try>${_("從前面 3 秒試播")}</button>`;
   renderScrubCuts();
   footNote(state.p?.report);
 }
@@ -323,7 +323,7 @@ function renderECuts() {
 // 改剪輯：可以復原、會自動存檔；整支都剪掉的不收
 function setECuts(next, message) {
   const cuts = cutOps.normalizeCuts(next, eDur());
-  if (cuts.length && !cutOps.keepSegments(cuts, eDur()).length) { showAlert("整支影片都剪掉了，至少要留一段"); return; }
+  if (cuts.length && !cutOps.keepSegments(cuts, eDur()).length) { showAlert(_("整支影片都剪掉了，至少要留一段")); return; }
   pushUndo();
   state.cuts = cuts;
   ed.selIn = ed.selOut = null;
@@ -332,20 +332,20 @@ function setECuts(next, message) {
   renderECuts();
   renderList();
   showCue();
-  if (message) toast(message, [{ label: "復原", run: undo }], 5000);
+  if (message) toast(message, [{ label: _("復原"), run: undo }], 5000);
 }
 const eMarkIn = () => { ed.selIn = video.currentTime * 1000; if (ed.selOut !== null && ed.selOut <= ed.selIn) ed.selOut = null; ed.picked = -1; renderECuts(); };
 const eMarkOut = () => { ed.selOut = video.currentTime * 1000; if (ed.selIn !== null && ed.selIn >= ed.selOut) ed.selIn = null; ed.picked = -1; renderECuts(); };
-const eCutSelection = () => { const sel = eSel(); if (sel) setECuts([...state.cuts, { start: sel[0], end: sel[1], by: "user" }], "剪掉了一段。"); };
+const eCutSelection = () => { const sel = eSel(); if (sel) setECuts([...state.cuts, { start: sel[0], end: sel[1], by: "user" }], _("剪掉了一段。")); };
 $("#eMarkIn").onclick = eMarkIn;
 $("#eMarkOut").onclick = eMarkOut;
 $("#eCutSel").onclick = eCutSelection;
-$("#eZoomIn").onclick = () => { const z = etl.zoom(1); $("#eZoomLabel").textContent = z === 1 ? "整支" : `×${z}`; };
-$("#eZoomOut").onclick = () => { const z = etl.zoom(-1); $("#eZoomLabel").textContent = z === 1 ? "整支" : `×${z}`; };
+$("#eZoomIn").onclick = () => { const z = etl.zoom(1); $("#eZoomLabel").textContent = z === 1 ? _("整支") : `×${z}`; };
+$("#eZoomOut").onclick = () => { const z = etl.zoom(-1); $("#eZoomLabel").textContent = z === 1 ? _("整支") : `×${z}`; };
 $("#eCutNote").onclick = (e) => {
   const c = state.cuts[ed.picked];
   if (!c) return;
-  if (e.target.closest("[data-restore]")) setECuts(state.cuts.filter((_, i) => i !== ed.picked), "恢復了這一段。");
+  if (e.target.closest("[data-restore]")) setECuts(state.cuts.filter((x0, i) => i !== ed.picked), _("恢復了這一段。"));
   if (e.target.closest("[data-try]")) { seekMs(Math.max(0, c.start - 3000)); video.play(); }
 };
 // 剪掉這一句：連同前後一點點空白（不超過前後句）；已經剪掉的就恢復這一句的範圍
@@ -354,8 +354,8 @@ $("#cutCueBtn").onclick = () => {
   if (!c) return;
   // 和「剪掉這一句」用同一個範圍，恢復時才不會在前後留下一小段
   const start = Math.max(state.cues[i - 1]?.end ?? 0, c.start - 100), end = Math.min(state.cues[i + 1]?.start ?? eDur(), c.end + 100);
-  if ($("#cutCueBtn").dataset.gone) { setECuts(cutOps.subtractRange(state.cuts, start, end), "恢復了這一句。"); return; }
-  setECuts([...state.cuts, { start, end, by: "user" }], "剪掉了這一句，畫面和聲音都會從影片拿掉。");
+  if ($("#cutCueBtn").dataset.gone) { setECuts(cutOps.subtractRange(state.cuts, start, end), _("恢復了這一句。")); return; }
+  setECuts([...state.cuts, { start, end, by: "user" }], _("剪掉了這一句，畫面和聲音都會從影片拿掉。"));
 };
 
 // 縮圖一張一張串流進來（NDJSON）
@@ -376,10 +376,11 @@ async function streamTiles(url, signal, onTile) {
 }
 
 // ---- AI 剪輯建議（#6）----
-const AI_STEPS = { silence: "找長時間的靜音（本機）…", black: "找黑畫面（本機）…", ai: "AI 看逐字稿，找講錯重講、贅詞、離題…" };
+const AI_STEPS = { silence: _("找長時間的靜音（本機）…"), black: _("找黑畫面（本機）…"), ai: _("AI 看逐字稿，找講錯重講、贅詞、離題…") };
 const aiChecked = new Set();
 let aiPoll = 0;
 const aiItems = () => state.p?.suggestions?.items || [];
+const aiWhy = (reason) => I18N.msg(reason.replace(/^[^：]*：/, ""));   // 不翻：正規式去掉「類型：」前綴；說明文字是主機給的，查字典換語言
 function renderAi(p) {
   clearTimeout(aiPoll);
   $("#aiWho").textContent = p.proofreader === "claude" || !p.proofreader ? "Claude" : p.proofreader;
@@ -388,37 +389,37 @@ function renderAi(p) {
   $("#aiRun").hidden = !running;
   $("#aiIntro").hidden = running || !!(sug && sug.status === "done" && sug.items.length);
   $("#aiResult").hidden = running || !(sug && sug.status === "done" && sug.items.length);
-  $("#tabAi").textContent = sug?.items?.length ? `AI 剪輯 ${sug.items.length}` : "AI 剪輯";
+  $("#tabAi").textContent = sug?.items?.length ? _("AI 剪輯 {count}", { count: sug.items.length }) : _("AI 剪輯");
   etl.setHints(running ? [] : aiItems().filter((x) => aiChecked.has(x.id)));
   if (running) {
-    $("#aiStep").textContent = AI_STEPS[p.job.step] || "處理中…";
-    $("#aiElapsed").textContent = `已經過 ${Math.round((Date.now() - p.job.started) / 1000)} 秒；可以先繼續改字幕。`;
+    $("#aiStep").textContent = AI_STEPS[p.job.step] || _("處理中…");
+    $("#aiElapsed").textContent = _("已經過 {sec} 秒；可以先繼續改字幕。", { sec: Math.round((Date.now() - p.job.started) / 1000) });
     aiPoll = setTimeout(pollAi, 1500);
     return;
   }
   // 失敗只在剛發生時提示一次，之後打開專案不再跳
   const recent = (t) => t && Date.now() - Date.parse(t) < 15_000;
-  if (sug?.status === "failed" && recent(sug.created)) showAlert(`沒找成功：${sug.error}`);
-  if (sug?.lastError && recent(sug.lastErrorAt)) showAlert(`這次沒找成功（${sug.lastError}），先留著上一次的建議。`);
+  if (sug?.status === "failed" && recent(sug.created)) showAlert(_("沒找成功：{err}", { err: I18N.msg(sug.error) }));
+  if (sug?.lastError && recent(sug.lastErrorAt)) showAlert(_("這次沒找成功（{err}），先留著上一次的建議。", { err: I18N.msg(sug.lastError) }));
   if (!sug || sug.status !== "done") return;
   if (!sug.items.length) {
-    $("#aiFind").textContent = "重新找";
-    if (sug.created && Date.now() - Date.parse(sug.created) < 10_000) toast(sug.error ? `AI 那段沒成功（${esc(sug.error)}），本機也沒找到可以剪的地方。` : `沒有找到可以剪掉的地方。${esc(sug.warning || "")}`, [], 6000);
+    $("#aiFind").textContent = _("重新找");
+    if (sug.created && Date.now() - Date.parse(sug.created) < 10_000) toast(sug.error ? _("AI 那段沒成功（{err}），本機也沒找到可以剪的地方。", { err: esc(I18N.msg(sug.error)) }) : _("沒有找到可以剪掉的地方。{warn}", { warn: esc(I18N.msg(sug.warning || "")) }), [], 6000);
     return;
   }
   const items = sug.items;
   const total = items.filter((x) => aiChecked.has(x.id)).reduce((n, x) => n + x.end - x.start, 0);
   const kept = cutOps.keptDuration(cutOps.keepSegments(state.cuts, eDur()));
-  $("#aiSum").innerHTML = `找到 <b>${items.length}</b> 處可以剪，勾選的共 <b>${fmtLen(total)}</b>，全部剪完約 ${fmtLen(Math.max(0, kept - total))}。` +
-    (sug.usage?.calls ? `<br><span class="muted">AI 呼叫 ${sug.usage.calls} 次${p.proofreader === "claude" ? `（訂閱，API 等值 NT$${(sug.usage.cost_usd * 32).toFixed(1)}）` : ""}</span>` : "") +
-    (sug.error ? `<br><span style="color:var(--warn)">AI 那段沒成功，只列出本機找到的：${esc(sug.error)}</span>` : "") +
-    (sug.warning ? `<br><span style="color:var(--warn)">${esc(sug.warning)}</span>` : "") +
-    (sug.dropped ? `<br><span style="color:var(--warn)">${esc(sug.dropped)}</span>` : "");
-  const label = { silence: "靜音", black: "黑畫面", retake: "口誤重講", filler: "贅詞", offtopic: "離題", waiting: "等待" };
-  $("#aiList").innerHTML = items.map((x) => `<li class="${aiChecked.has(x.id) ? "" : "off"}"><input type="checkbox" data-sid="${x.id}"${aiChecked.has(x.id) ? " checked" : ""} aria-label="套用這一條"><div class="head"><button class="t" data-try="${x.id}" title="從前 2 秒試播到後 1 秒">${ops.fmtTime(x.start)}–${ops.fmtTime(x.end)}</button><span class="badge ${x.kind === "silence" || x.kind === "black" ? "" : "ai"}">${label[x.kind] || esc(x.kind)}</span><span class="muted">${fmtLen(x.end - x.start)}</span></div><span class="why">${esc(x.reason.replace(/^[^：]*：/, ""))}</span>${x.text ? `<span class="ex" title="${esc(x.text)}">「${esc(x.text)}」</span>` : ""}</li>`).join("");
+  $("#aiSum").innerHTML = _("找到 {found} 處可以剪，勾選的共 {sel}，全部剪完約 {left}。", { found: `<b>${items.length}</b>`, sel: `<b>${fmtLen(total)}</b>`, left: fmtLen(Math.max(0, kept - total)) }) +
+    (sug.usage?.calls ? `<br><span class="muted">${_("AI 呼叫 {n} 次{note}", { n: sug.usage.calls, note: p.proofreader === "claude" ? _("（訂閱，API 等值 NT${cost}）", { cost: (sug.usage.cost_usd * 32).toFixed(1) }) : "" })}</span>` : "") +
+    (sug.error ? `<br><span style="color:var(--warn)">${_("AI 那段沒成功，只列出本機找到的：{err}", { err: esc(I18N.msg(sug.error)) })}</span>` : "") +
+    (sug.warning ? `<br><span style="color:var(--warn)">${esc(I18N.msg(sug.warning))}</span>` : "") +
+    (sug.dropped ? `<br><span style="color:var(--warn)">${esc(I18N.msg(sug.dropped))}</span>` : "");
+  const label = { silence: _("靜音"), black: _("黑畫面"), retake: _("口誤重講"), filler: _("贅詞"), offtopic: _("離題"), waiting: _("等待") };
+  $("#aiList").innerHTML = items.map((x) => `<li class="${aiChecked.has(x.id) ? "" : "off"}"><input type="checkbox" data-sid="${x.id}"${aiChecked.has(x.id) ? " checked" : ""} aria-label="${_("套用這一條")}"><div class="head"><button class="t" data-try="${x.id}" title="${_("從前 2 秒試播到後 1 秒")}">${ops.fmtTime(x.start)}–${ops.fmtTime(x.end)}</button><span class="badge ${x.kind === "silence" || x.kind === "black" ? "" : "ai"}">${label[x.kind] || esc(x.kind)}</span><span class="muted">${fmtLen(x.end - x.start)}</span></div><span class="why">${esc(aiWhy(x.reason))}</span>${x.text ? `<span class="ex" title="${esc(x.text)}">${_("「{text}」", { text: esc(x.text) })}</span>` : ""}</li>`).join("");
   $("#aiAll").checked = items.every((x) => aiChecked.has(x.id));
   const n = items.filter((x) => aiChecked.has(x.id)).length;
-  $("#aiApply").textContent = `套用勾選的 ${n} 段`;
+  $("#aiApply").textContent = _("套用勾選的 {n} 段", { n });
   $("#aiApply").disabled = $("#aiApplyRender").disabled = !n;
 }
 async function pollAi() {
@@ -455,7 +456,7 @@ function applyAi() {
   if (!chosen.length) return false;
   const next = [...state.cuts, ...chosen.map((x) => ({ start: x.start, end: x.end, by: "ai", reason: x.reason }))];
   const before = state.cuts;
-  setECuts(next, `套用了 ${chosen.length} 段 AI 建議。`);
+  setECuts(next, _("套用了 {n} 段 AI 建議。", { n: chosen.length }));
   if (state.cuts === before) return false;   // 沒套成（例如會把整支剪掉）
   state.p.suggestions.items = aiItems().filter((x) => !aiChecked.has(x.id));
   aiChecked.clear();
