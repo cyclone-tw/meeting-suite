@@ -1,5 +1,7 @@
 # meeting-suite
 
+繁體中文 | [English](README.en.md)
+
 在自己的 Mac 上把會議與影片變成逐字稿、字幕、總結與心智圖。兩個工具：
 
 | 資料夾 | 是什麼 | 怎麼用 |
@@ -72,6 +74,7 @@ python3 -I server.py          # 網址 http://127.0.0.1:18095/，Ctrl-C 停止
 
 - 開始前在「新的會議」寫會議說明（例如「主持人開場，四位老師輪流分享，最後 Q&A」），AI 依它判斷誰在講、是主持還是分享。
 - 名字、講者、專有名詞聽錯了，按時間軸上的「AI 修正」，用一句話說要改什麼，勾選後整場一起換。
+- 會議結束後改了說明，「會議說明」→「依說明重整這場」用新的說明把整場重新整理一次。
 - 開機自動啟動、手機也要連：`bash deploy/install-macmini.sh`（launchd 常駐，並用 `tailscale serve` 開只有自己 tailnet 連得到的 HTTPS 網址）。
 - 會議暫存在 `~/.local/share/meeting-scribe/drafts/`，存到 Drive 後刪除，沒存的保留 7 天。
 
