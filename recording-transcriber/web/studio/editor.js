@@ -161,6 +161,18 @@ function showEditor(p) {
   $("#saveNote").textContent = p.updated ? _("已儲存 {time}", { time: new Date(p.updated).toLocaleTimeString(UI_LANG === "en" ? "en-US" : "zh-TW", { hour: "2-digit", minute: "2-digit" }) }) : "";
   loadCorr();
   if (p.burn?.status === "running") openBurn();
+  showPlain(p);
+}
+
+// 不要字幕的專案（#158）：只留影片、時間軸剪輯與說明欄，字幕相關的畫面藏起來
+function showPlain(p) {
+  const plain = p.source?.captions === "none", was = document.documentElement.classList.contains("no-subs");
+  document.documentElement.classList.toggle("no-subs", plain);
+  $("#descHint").hidden = plain;
+  $("#descPlainHint").hidden = !plain;
+  $("#descRedo").hidden = plain;
+  if (plain) document.querySelector('.tabs button[data-tab="descPane"]').click();
+  else if (was) $("#tabCues").click();
 }
 
 // ---- 外語影片（#56）：中文／原文／雙語，翻譯 ----

@@ -137,21 +137,26 @@
     <div id="tStartBox">
       <div class="sum" id="tSum"></div>
       <ol id="cutList"></ol>
+      <div id="langBlock">
       <div class="q"><b>?</b>影片說的是哪種語言…</div>
       <select class="text-in" id="langSel" aria-label="影片說的語言">
         <option value="zh">中文（一般字幕）</option><option value="en">英文（翻成中文、可做雙語）</option><option value="ja">日文（翻成中文、可做雙語）</option><option value="ko">韓文（翻成中文、可做雙語）</option>
       </select>
       <p class="hint" id="langHint" hidden>外語影片會用 Soniox 辨識原文，再請 Claude 逐句翻成台灣繁中；編輯時可以切換中文、原文或雙語。</p>
+      </div>
       <div class="q"><b>?</b>字幕從哪裡來…</div>
       <div class="seg-ctl" role="group" aria-label="字幕從哪裡來" id="subSeg">
         <button type="button" data-v="asr" aria-pressed="true">自動辨識</button>
         <button type="button" data-v="file" aria-pressed="false">用已有的字幕檔</button>
+        <button type="button" data-v="none" aria-pressed="false">不要字幕</button>
       </div>
+      <p class="hint" id="plainHint" hidden>不辨識、不校對，也不寫說明欄，沒有任何費用。適合已經剪好、不需要字幕的 demo 影片：按下一步就直接到上傳 YouTube。</p>
       <div id="subBox" hidden>
         <p class="hint" id="subFile" style="margin:0"></p>
         <div class="names-actions"><button type="button" class="btn sm" id="subPick">選字幕檔…</button></div>
         <p class="hint">SRT 或 VTT。不送辨識、不做 AI 校對；中文只轉台灣用語與全形標點，再請 AI 寫 YouTube 說明欄。之後一樣可以改字、剪接、燒字幕、上傳。</p>
       </div>
+      <div id="privBlock">
       <div class="q"><b>!</b>這支影片有沒有個資…</div>
       <div class="seg-ctl" role="group" aria-label="是否含個資" id="privSeg">
         <button type="button" data-v="public" aria-pressed="false">沒有個資</button>
@@ -163,6 +168,7 @@
         <p class="hint">標成含個資時，可能走中國大陸雲端模型的 agent 會被停用。</p>
         <div class="seg-ctl" role="group" aria-label="校對 agent" id="proofSeg" style="margin-top:8px"></div>
       </details>
+      </div>
       <div class="q" id="trkQ"><b>+</b>有沒有 Discord 分軌（標出誰在講）…</div>
       <div id="trkBox">
         <p class="hint" id="trkFound" style="margin:0"></p>
@@ -356,7 +362,8 @@
       </div>
     </div>
     <div class="pane" id="descPane" hidden>
-      <p class="hint" style="margin:0">AI 依字幕寫的簡介、章節和每章重點，可以直接改；會自動存成 youtube-description.md。</p>
+      <p class="hint" style="margin:0" id="descHint">AI 依字幕寫的簡介、章節和每章重點，可以直接改；會自動存成 youtube-description.md。</p>
+      <p class="hint" style="margin:0" id="descPlainHint" hidden>這支沒有字幕，說明欄沒有自動寫；想寫的話在這裡打，上傳時也能再改。</p>
       <textarea id="descText" spellcheck="false"></textarea>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn" id="copyDesc">複製全文</button><button class="btn" id="descRedo" title="依目前的字幕重新寫，字幕不會變動">重新寫說明欄…</button><button class="btn" id="descStop" hidden>停止</button><span class="muted" id="descCount" style="font-size:13px"></span></div>
     </div>
@@ -499,7 +506,7 @@
       <div class="seg-ctl" role="group" aria-label="誰看得到" id="ytPrivacy"><button data-v="private">私人</button><button data-v="unlisted">不公開</button><button data-v="public">公開</button><button data-v="schedule">排程</button></div>
       <input type="datetime-local" class="text-in" id="ytWhen" hidden aria-label="公開時間">
     </div>
-    <div class="field"><span>字幕</span>
+    <div class="field" id="ytSubsField"><span>字幕</span>
       <div class="seg-ctl" role="group" aria-label="字幕" id="ytSubs"><button data-v="cc">CC 字幕（可開關）</button><button data-v="burned">燒在畫面上</button></div>
       <label class="hint yt-alsocc" id="ytAlsoCcRow" hidden><input type="checkbox" id="ytAlsoCc" checked><span>也掛上 CC 字幕：YouTube 能搜尋影片裡說的話、自動翻譯，別人要引用內容也方便；觀眾通常要自己按 CC 才會看到</span></label>
     </div>

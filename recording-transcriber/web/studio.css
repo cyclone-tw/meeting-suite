@@ -390,3 +390,8 @@ a.btn { text-decoration:none; }
 #rosterTable td:nth-child(3) { width:6.5em; color:var(--muted); white-space:nowrap; }
 #rosterTable td:last-child { width:1%; white-space:nowrap; text-align:right; }
 .roster-add .text-in { flex:1 1 9em; width:auto; padding:4px 8px; }
+
+/* 不要字幕的專案（#158）：沒有字幕可以改、燒、翻或總結 */
+html.no-subs #burnOpen, html.no-subs #wikiOpen, html.no-subs #cueCard, html.no-subs #overlay,
+html.no-subs #prevCue, html.no-subs #nextCue, html.no-subs #playCue,
+html.no-subs .tabs button:not([data-tab="descPane"]) { display:none !important; }

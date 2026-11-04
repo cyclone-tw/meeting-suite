@@ -95,7 +95,11 @@ export const cutsKey = (cuts) => (cuts || []).map((c) => `${c.start}-${c.end}`).
 const CC_FAILED = "CC 字幕沒有掛上去";
 // 已經上傳到 YouTube 的自己的錄影（#75）：整理時才可以連原始錄影一起丟垃圾桶；從 YouTube 下載的走 trashVideo
 export const uploadedOwnVideo = (p) => Boolean(p?.youtube?.video_id) && p.youtube.status === "done" && !p.source?.downloaded;
-export const needsCc = (y = {}) => Boolean(y.video_id) && !y.cc_added
+// 不要字幕的專案（#158）：demo 影片等不需要字幕的，不辨識、不校對，上傳時不燒也不掛 CC
+export const isPlain = (p) => p?.source?.captions === "none";
+// 不要字幕的專案沒有字幕可做的事（POST 的 action）
+const PLAIN_BLOCKED = new Set(["retry", "reprocess", "relayout", "describe", "recap", "module", "mindmap", "names", "speakers", "translate", "subtitle-file", "handoff"]);
+export const needsCc = (y = {}) => Boolean(y.video_id) && y.subtitles !== "none" && !y.cc_added
   && (y.status === "cancelled" || y.subtitles === "burned" || (y.warnings || []).some((w) => w.startsWith(CC_FAILED)));
 
 // 直式短片的指紋（#54）：片段範圍、標題、片段內的剪輯與字幕都沒變，輸出的影片就還是最新的
@@ -1173,10 +1177,14 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
     const id = projectId(dir);
     const name = path.basename(video, path.extname(video));
     // 使用者自己的字幕檔（#148）：先讀過一次，檔案不對就不建專案
+    const plain = body.noSubtitles === true;
+    if (plain && body.subtitles) throw new Error("「不要字幕」和字幕檔不能同時用");
+    if (plain && body.tracks) throw new Error("「不要字幕」不能同時用 Discord 分軌（分軌是替辨識出來的字幕標講者）");
     const own = body.subtitles ? readSubtitleFile(body.subtitles) : null;
     if (own && body.tracks) throw new Error("用字幕檔時不能同時用 Discord 分軌（分軌是替辨識出來的字幕標講者）");
     if (fs.existsSync(path.join(dir, "project.json"))) {
       if (own) throw new Error("這支影片之前做過字幕；要改用字幕檔，先在首頁按「整理…」清掉這支的處理資料");
+      if (plain) throw new Error("這支影片之前做過字幕；要改用「不要字幕」，先在首頁按「整理…」清掉這支的處理資料");
       const p = readProject(dir);
       // 這次改標成含個資（公開 → 非公開）：照這次的算；原本的校對者若可能走中國大陸雲端模型就改回 Claude
       const stricter = p.privacy === "public" && privacy !== "public";
@@ -1195,7 +1203,7 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
     const base = { version: 1, video, name, privacy, proofreader, size: "medium", rev: 0, created: new Date().toISOString(), cues: [], description: "",
       fps: d.ffprobeFps(video), duration_ms: duration, cuts, ...(lang !== "zh" ? { lang, lang_mode: "both" } : {}), ...(tracks ? { tracks } : {}),
       ...(own ? { source: { kind: "file", captions: "file", captions_file: `captions${own.ext}`, file_name: path.basename(own.file) } } : {}) };
-    if (!own && fs.existsSync(dir) && fs.statSync(dir).isDirectory() && fs.existsSync(path.join(dir, "subtitles.srt"))) {
+    if (!own && !plain && fs.existsSync(dir) && fs.statSync(dir).isDirectory() && fs.existsSync(path.join(dir, "subtitles.srt"))) {
       // pnpm run subtitle 做過的：直接讀它的 SRT 與說明欄，不重新辨識
       const desc = path.join(dir, "youtube-description.md");
       const p = { ...base, cuts: [], status: "ready", rev: 1, cues: validateCues(parseSrt(fs.readFileSync(path.join(dir, "subtitles.srt"), "utf8"))),
@@ -1206,12 +1214,19 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       return { id, imported: true };
     }
     if (fs.existsSync(dir) && (!fs.statSync(dir).isDirectory() || fs.readdirSync(dir).length)) throw new Error(`「${path.basename(dir)}」資料夾已經有別的檔案，請先移走`);
-    d.preflight({ privacy, proofreader, engine: own ? "none" : "soniox", burn: false });
+    d.preflight({ privacy, proofreader, engine: own || plain ? "none" : "soniox", burn: false });
     if (tracks) rememberNames(tracks.names, env);   // 下次同一群人自動帶入
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     fs.chmodSync(dir, 0o700);
     // 字幕檔複製一份進專案：原檔之後搬走或改掉，重新處理還是用當初選的那份
     if (own) writePrivate(path.join(dir, base.source.captions_file), own.raw);
+    // 不要字幕（#158）：沒有東西要處理，建好就是 ready，不送辨識、不跑校對、不寫說明欄
+    if (plain) {
+      save(dir, { ...base, status: "ready", rev: 1, source: { kind: "none", captions: "none" } });
+      projects.set(id, dir);
+      rememberRecent({ dir, name }, env);
+      return { id, ready: true };
+    }
     save(dir, { ...base, status: "processing" });
     projects.set(id, dir);
     rememberRecent({ dir, name }, env);
@@ -1437,6 +1452,7 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       const body = req.method === "PUT" || req.method === "POST" ? await readBody(req) : {};
       const found = load(sm[1]);
       if (!found) return fail(res, 404, "找不到這個專案");
+      if (req.method !== "GET" && isPlain(found.project)) return fail(res, 409, "這支影片是「不要字幕」的，沒有字幕可以挑短片");
       return shortsRoute(req, res, sm[1], found.dir, found.project, sm[2] || sm[4] || "", sm[3] || "", body);
     }
     const m = /^\/api\/projects\/([0-9a-f]{16})(?:\/(video|thumbs|wave|burn|suggest|cancel|reveal|retry|reprocess|relayout|forget|clear|youtube|captions|recap|module|mindmap|drive|describe|handoff|names|speakers|translate|subtitle-file))?$/.exec(p);
@@ -1508,6 +1524,11 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       save(dir, project);
       return send(res, 200, { rev: project.rev, updated: project.updated });
     }
+    // 不要字幕的專案（#158）：沒有字幕可以處理、燒、翻或總結；只剪接與本機的靜音偵測照常
+    if (req.method === "POST" && isPlain(project)
+      && (PLAIN_BLOCKED.has(action) || (action === "burn" && body.subtitles !== false) || (action === "suggest" && body.ai !== false))) {
+      return fail(res, 409, "這支影片是「不要字幕」的，沒有字幕可以做這件事");
+    }
     if (req.method === "POST" && action === "burn") {
       if (jobs.has(id)) return fail(res, 409, "已經在處理");
       if (project.status !== "ready") return fail(res, 409, "字幕還沒好");
@@ -1525,7 +1546,8 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       if (!ch.connected) return fail(res, 409, `「${ch.title}」的授權失效了，請到「設定」重新連結`);
       ytClient();
       const meta = videoMeta({ ...body, description: typeof body.description === "string" ? body.description : remapDescription(project.description || "", project.cuts || []) });
-      const subtitles = SUBTITLE_MODES.includes(body.subtitles) ? body.subtitles : ch.defaults.subtitles;
+      // 不要字幕的專案（#158）：不管頁面或頻道預設怎麼選，都不燒、不掛 CC
+      const subtitles = isPlain(project) ? "none" : SUBTITLE_MODES.includes(body.subtitles) ? body.subtitles : ch.defaults.subtitles;
       const playlistId = typeof body.playlistId === "string" && /^[\w-]{0,64}$/.test(body.playlistId) ? body.playlistId : "";
       // 燒在畫面上也預設掛 CC 字幕（#71）：觀眾通常要自己開 CC 才看得到，YouTube 卻能搜尋、翻譯，別人要引用內容也方便
       const alsoCc = subtitles === "burned" && body.alsoCc !== false;

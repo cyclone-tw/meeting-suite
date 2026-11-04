@@ -97,7 +97,7 @@ function renderTrim() {
     ? `${_("原片 {orig} → 剪完 {kept}", { orig: fmtLen(dur), kept: `<b>${fmtLen(kept)}</b>` })}<br><span class="muted">${_("剪掉 {n} 段，共 {len}；剪掉的部分不會送去辨識", { n: trim.cuts.length, len: fmtLen(removed) })}</span>`
     : `${_("原片 {orig}", { orig: `<b>${fmtLen(dur)}</b>` })}<br><span class="muted">${_("還沒剪。不剪也可以直接開始，之後在編輯頁也能剪。")}</span>`;
   $("#cutList").innerHTML = trim.cuts.map((x, i) => `<li><button class="t" data-pick="${i}">${ops.fmtTime(x.start)}–${ops.fmtTime(x.end)}</button><span class="why">${fmtLen(x.end - x.start)}${x.reason ? ` · ${esc(x.reason)}` : ""}</span><button class="btn sm ghost" data-unc="${i}">${_("恢復")}</button></li>`).join("");
-  $("#costHint").textContent = kept > 0 && home.sub.mode === "file" ? _("用字幕檔：不送辨識、沒有辨識費；說明欄走 Claude 訂閱。") : kept > 0 ? _("辨識約 NT${cost}（Soniox，每小時約 NT$3），{what}走 Claude 訂閱。", { cost: Math.max(0.1, (kept / 3600000) * 3).toFixed(1), what: $("#langSel").value === "zh" ? _("校對") : _("翻譯") }) : _("整支都剪掉了，至少要留一段。");
+  $("#costHint").textContent = kept > 0 && home.sub.mode === "none" ? _("不辨識、不校對，沒有任何費用；接著直接上傳 YouTube。") : kept > 0 && home.sub.mode === "file" ? _("用字幕檔：不送辨識、沒有辨識費；說明欄走 Claude 訂閱。") : kept > 0 ? _("辨識約 NT${cost}（Soniox，每小時約 NT$3），{what}走 Claude 訂閱。", { cost: Math.max(0.1, (kept / 3600000) * 3).toFixed(1), what: $("#langSel").value === "zh" ? _("校對") : _("翻譯") }) : _("整支都剪掉了，至少要留一段。");
   refreshStart();
 }
 

@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { stateDir, writePrivate } from "./studio-project.mjs";
-import { checkDefaults } from "./youtube.mjs";
+import { checkDefaults, refreshAccess } from "./youtube.mjs";
 
 export const KEYCHAIN_SERVICE = "cyclone-subtitle-studio-youtube";
 const SAFE = /^[\w\-./~+=:]{1,4096}$/;   // Google 的 token 與 secret 都只有這些字元；其他的不寫進鑰匙圈指令
@@ -52,3 +52,24 @@ export function saveSettings(settings, env = process.env) {
 }
 
 export const secretAccount = { client: "client-secret", channel: (id) => `refresh:${id}` };
+
+// OAuth 用戶端（client id 在設定檔、secret 在鑰匙圈）；沒設定好就丟錯，不連網
+export function loadClient({ settings = loadSettings(), secrets }) {
+  const secret = settings.client ? secrets.get(secretAccount.client) : "";
+  if (!settings.client || !secret) throw Object.assign(new Error("還沒設定 YouTube：請先在字幕工作室的「設定」選 Google 下載的 OAuth 用戶端 JSON 檔"), { status: 409 });
+  return { client_id: settings.client.client_id, client_secret: secret };
+}
+
+// 拿某個頻道的 access token：快過期或 force 就用鑰匙圈的 refresh token 換新的（只放記憶體）。
+// 授權被取消時丟 reauth 錯誤，由呼叫的人決定要不要標成要重新連結（指令不改設定檔）
+export function accessTokenGetter({ fetch, secrets, client, channelId, cache = new Map() }) {
+  return async (force = false) => {
+    const c = cache.get(channelId);
+    if (!force && c && c.exp > Date.now() + 60_000) return c.token;
+    const refreshToken = secrets.get(secretAccount.channel(channelId));
+    if (!refreshToken) throw Object.assign(new Error("這個頻道的授權不見了，請到字幕工作室的「設定」重新連結"), { code: "reauth" });
+    const t = await refreshAccess({ fetch, client, refreshToken });
+    cache.set(channelId, { token: t.access_token, exp: Date.now() + (Number(t.expires_in) || 3600) * 1000 });
+    return t.access_token;
+  };
+}

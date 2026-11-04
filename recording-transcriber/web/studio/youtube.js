@@ -211,7 +211,10 @@ function ytCounts() {
 function ytPlan() {
   const p = state.p, outs = p.outputs || {}, cuts = state.cuts;
   let how;
-  if (ytSubsMode === "burned") {
+  if (p.source?.captions === "none") {
+    // 不要字幕（#158）：沒有字幕可燒也沒有字幕可掛
+    how = !cuts.length ? _("直接上傳原始影片，不加字幕。") : outs.cut && outs.cut.cuts === cutsKeyOf(cuts) ? _("用已經輸出的剪接版上傳，不加字幕。") : _("會先輸出剪接好的影片（不燒字幕，要花幾分鐘），再上傳，不加字幕。");
+  } else if (ytSubsMode === "burned") {
     how = outs.burn && outs.burn.rev === state.rev && (outs.burn.style || "outline") === state.style && (outs.burn.lang_mode || "") === (state.foreign ? state.langMode : "") ? _("用已經燒好字幕的影片上傳。") : _("會先把字幕燒進影片（要花幾分鐘），再上傳。");
     if ($("#ytAlsoCc").checked) how += _("最後也把字幕檔掛成 CC 字幕。");
   } else if (!cuts.length) how = _("直接上傳原始影片，再把字幕檔掛成 CC 字幕。");
@@ -240,6 +243,8 @@ async function openYoutube() {
     const sug = state.p.youtube_suggest;
     const sugNewer = sug?.title && (!last?.title || Date.parse(sug.created || 0) > Date.parse(last.started || 0));
     $("#ytTitle").value = (sugNewer ? sug.title : last?.title) || state.p.name;
+    const plain = state.p.source?.captions === "none";   // 不要字幕（#158）：不選字幕模式，也不用補 CC
+    $("#ytSubsField").hidden = plain;
     $("#ytDesc").value = cutOps.remapDescription(state.desc, state.cuts);
     if (ytChannelObj()) applyChannelDefaults(ytChannelObj());
     ytCounts();
@@ -372,7 +377,7 @@ async function refreshYt() {
 // 上傳過、還沒掛 CC 字幕：條件和伺服器的 needsCc 一樣
 function ytNeedsCc(y = {}) {
   const ccFailed = (y.warnings || []).some((w) => w.startsWith("CC 字幕沒有掛上去"));   // 不翻：和伺服器存的警告文字比對
-  return Boolean(y.video_id) && ["done", "cancelled"].includes(y.status) && !y.cc_added && (y.status === "cancelled" || y.subtitles === "burned" || ccFailed);
+  return Boolean(y.video_id) && y.subtitles !== "none" && ["done", "cancelled"].includes(y.status) && !y.cc_added && (y.status === "cancelled" || y.subtitles === "burned" || ccFailed);
 }
 async function addCcToYoutube(e) {
   const b = e.currentTarget;

@@ -826,5 +826,18 @@ window.StudioLangEN = Object.freeze({
  "確定蓋掉改過的？": "Overwrite your edits?",
  "切換語言會重新載入頁面，這裡還沒開始處理的剪輯與選項會不見。要切換嗎？": "Switching language reloads the page, and anything here that hasn't been processed yet (trims, the typed path, chosen options) will be lost. Switch anyway?",
  "{ranges} 這段 AI 回覆的格式不對，沒有 AI 建議；其他段落照常。按「重新找」可以再試一次。": "{ranges}: the AI reply for this part was malformed, so there are no AI suggestions for it; other parts are fine. Click \"Search again\" to retry.",
- "AI 建議剪掉超過一半，看起來不對，只保留靜音與黑畫面的建議": "The AI suggested trimming more than half, which looks wrong, so only the silence and black-screen suggestions are kept"
+ "AI 建議剪掉超過一半，看起來不對，只保留靜音與黑畫面的建議": "The AI suggested trimming more than half, which looks wrong, so only the silence and black-screen suggestions are kept",
+ "不要字幕": "No subtitles",
+ "不辨識、不校對，也不寫說明欄，沒有任何費用。適合已經剪好、不需要字幕的 demo 影片：按下一步就直接到上傳 YouTube。": "Nothing is recognized, proofread or written, and it costs nothing. Meant for finished demo videos that need no subtitles: the next step goes straight to the YouTube upload.",
+ "這支沒有字幕，說明欄沒有自動寫；想寫的話在這裡打，上傳時也能再改。": "This video has no subtitles, so no description was written. Type one here if you want; you can also edit it when uploading.",
+ "下一步：上傳 YouTube": "Next: upload to YouTube",
+ "不辨識、不校對，沒有任何費用；接著直接上傳 YouTube。": "Nothing is recognized or proofread, so it costs nothing; you go straight to the YouTube upload.",
+ "直接上傳原始影片，不加字幕。": "The original video is uploaded as is, without subtitles.",
+ "用已經輸出的剪接版上傳，不加字幕。": "The cut video that was already exported is uploaded, without subtitles.",
+ "會先輸出剪接好的影片（不燒字幕，要花幾分鐘），再上傳，不加字幕。": "The cut video is exported first (no burned-in subtitles; takes a few minutes), then uploaded, without subtitles.",
+ "「不要字幕」和字幕檔不能同時用": "\"No subtitles\" and a subtitle file cannot be used together.",
+ "「不要字幕」不能同時用 Discord 分軌（分軌是替辨識出來的字幕標講者）": "\"No subtitles\" cannot be used with Discord tracks (tracks label speakers on recognized subtitles).",
+ "這支影片之前做過字幕；要改用「不要字幕」，先在首頁按「整理…」清掉這支的處理資料": "Subtitles were made for this video before. To switch to \"No subtitles\", first clear its processing data with \"Manage…\" on the home page.",
+ "這支影片是「不要字幕」的，沒有字幕可以挑短片": "This video is set to \"No subtitles\", so there is nothing to pick shorts from.",
+ "這支影片是「不要字幕」的，沒有字幕可以做這件事": "This video is set to \"No subtitles\", so there are no subtitles to do this with."
 });

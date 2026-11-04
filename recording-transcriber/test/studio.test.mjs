@@ -10,7 +10,7 @@ import { createHash } from "node:crypto";
 import * as ops from "../lib/cue-ops.mjs";
 import { icloudStudioDir, isOffline, markAiCues, parseSrt, projectDirFor, readProject, validateCues, writeProject } from "../lib/studio-project.mjs";
 import { copyToDriveIsolated } from "../lib/studio-drive.mjs";
-import { createStudio, shortKey } from "../scripts/subtitle-studio.mjs";
+import { createStudio, needsCc, shortKey } from "../scripts/subtitle-studio.mjs";
 import { fakeRecapFiles } from "./fake-recap-files.mjs";
 import { runSubtitle } from "../scripts/subtitle-run.mjs";
 import { addCorrection } from "../lib/corrections-sync.mjs";
@@ -3361,4 +3361,62 @@ test("start from an existing SRT/VTT: nearby files suggested, no recognition, ba
   const o2 = await s.req("POST", "/api/open", { body: { video: v2, privacy: "public", subtitles: picked.path } });
   const p2 = await s.waitFor(o2.json.id, (x) => x.status === "ready");
   assert.deepEqual(p2.cues.map((c) => c.text), ["Hello"]);
+});
+
+// ---- 不要字幕（recording-transcriber#158）：demo 影片直接上傳，不辨識、不校對、不掛 CC ----
+test("no subtitles (#158): ready at once, nothing recognized, conflicting options refused", async (t) => {
+  const seen = { preflight: [] };
+  const { s } = await connectedStudio(t, { deps: { preflight(o) { seen.preflight.push(o); } } });
+  const bad = async (body, re, why) => {
+    const r = await s.req("POST", "/api/open", { body: { video: s.video, privacy: "public", noSubtitles: true, ...body } });
+    assert.equal(r.status, 400, why);
+    assert.match(r.json.error, re, why);
+  };
+  await bad({ tracks: { zip: "/x.zip", names: {} } }, /分軌/, "沒有字幕就沒有講者可標");
+  await bad({ subtitles: path.join(s.dir, "v.srt") }, /不能同時/, "不要字幕和字幕檔二選一");
+  assert.equal(s.calls.prepare, 0);
+  const open = await s.req("POST", "/api/open", { body: { video: s.video, privacy: "public", noSubtitles: true } });
+  assert.equal(open.status, 200, open.raw);
+  const p = (await s.req("GET", `/api/projects/${open.json.id}`)).json;
+  assert.equal(p.status, "ready", "不用等處理");
+  assert.deepEqual(p.cues, []);
+  assert.equal(p.source.captions, "none");
+  assert.equal(s.calls.prepare, 0, "不送辨識");
+  assert.equal(seen.preflight.at(-1).engine, "none", "不需要 Soniox 金鑰");
+  // 沒有字幕可處理的動作都擋下來
+  for (const action of ["reprocess", "retry", "describe", "relayout"]) {
+    assert.equal((await s.req("POST", `/api/projects/${open.json.id}/${action}`, { body: {} })).status, 409, `${action} 沒有字幕可做`);
+  }
+  assert.equal((await s.req("POST", `/api/projects/${open.json.id}/burn`, { body: {} })).status, 409, "沒有字幕可燒");
+  assert.equal((await s.req("POST", `/api/projects/${open.json.id}/suggest`, { body: {} })).status, 409, "沒有逐字稿，AI 剪輯建議做不了");
+  assert.equal((await s.req("POST", `/api/projects/${open.json.id}/suggest`, { body: { ai: false } })).status, 200, "本機靜音與黑畫面偵測不需要字幕");
+});
+
+test("no subtitles (#158): upload sends the original, never captions; with cuts only a cut export", async (t) => {
+  const { s, g } = await connectedStudio(t);
+  const id = (await s.req("POST", "/api/open", { body: { video: s.video, privacy: "public", noSubtitles: true } })).json.id;
+  // 就算頁面或頻道預設要 CC／燒字幕，沒有字幕的專案一律不掛、不燒
+  const r = await s.req("POST", `/api/projects/${id}/youtube`, { body: { channel: "UC123", title: "demo", privacy: "private", subtitles: "burned", alsoCc: true } });
+  assert.equal(r.status, 200, r.raw);
+  let p = await s.waitFor(id, (x) => !x.job && x.youtube?.status === "done");
+  assert.equal(s.calls.burn, 0, "沒有剪輯：原片直接上傳，不輸出");
+  assert.deepEqual(Buffer.concat(g.received), fs.readFileSync(s.video));
+  assert.equal(g.captions.length, 0, "不掛 CC 字幕");
+  assert.equal(p.youtube.subtitles, "none");
+  assert.equal(p.youtube.url, "https://youtu.be/VID123");
+  assert.equal(g.meta.snippet.description, "", "沒給說明欄就是空的，不去寫");
+  // 不用補 CC：首頁不提示，補 CC 的路擋掉
+  const recent = (await s.req("GET", "/api/home")).json.recent.find((x) => x.id === id);
+  assert.equal(recent.youtube.needs_cc, false);
+  assert.equal((await s.req("POST", `/api/projects/${id}/captions`)).status, 409);
+  assert.equal(needsCc({ video_id: "x", status: "cancelled", subtitles: "none" }), false, "停在半路的無字幕上傳也不用補 CC");
+  assert.equal(needsCc({ video_id: "x", status: "cancelled", subtitles: "cc" }), true, "有字幕的照舊");
+  // 有剪輯：先輸出不燒字幕的剪接版再傳，一樣不掛字幕
+  await s.req("PUT", `/api/projects/${id}`, { body: { rev: p.rev, cuts: [{ start: 1100, end: 2100, by: "user" }] } });
+  await s.req("POST", `/api/projects/${id}/youtube`, { body: { channel: "UC123", title: "demo", subtitles: "cc" } });
+  p = await s.waitFor(id, (x) => !x.job && x.youtube?.status === "done" && x.youtube.cuts !== undefined && x.outputs?.cut);
+  assert.equal(s.calls.burn, 1);
+  assert.equal(s.calls.subtitles, false, "只剪接，不燒字幕");
+  assert.equal(p.outputs.cut.file, "v-剪輯.mp4");
+  assert.equal(g.captions.length, 0);
 });

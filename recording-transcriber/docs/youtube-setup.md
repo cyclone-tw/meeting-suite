@@ -72,6 +72,21 @@ Google Cloud 主控台的選單可能顯示中文或英文，下面兩種都寫�
 - **從 Google 那邊取消**：到 [Google 帳戶的第三方存取權](https://myaccount.google.com/connections)移除 Subtitle Studio。
 - **兩台電腦**：各自連結一次，因為授權存在各自的鑰匙圈裡。可以用同一個 JSON 檔。
 
+## 不開工作室，直接用指令上傳（#159）
+
+做好的影片（例如 agent 剪好的 demo）不需要字幕時，可以不開網頁直接傳：
+
+```bash
+pnpm run youtube-upload ~/Movies/demo.mp4 --title "示範影片" --desc-file 說明.md
+pnpm run youtube-upload --channels      # 列出已連結的頻道
+```
+
+- 頻道與授權沿用工作室「設定」裡連結的（同一把鑰匙圈），指令不改設定檔、不印 token。
+- **預設私人、不通知訂閱者。** 要公開一定要明確寫 `--privacy public`（或 `unlisted`）；`--notify` 才通知訂閱者。
+- 原檔直接上傳，不重新編碼，不帶字幕；要 CC 字幕、燒字幕或粗剪，用工作室。
+- 其他選項：`--channel <id 或名稱>`、`--playlist <id>`、`--tags a,b`、`--category <id>`、`--language zh-TW`、`--kids`、`--json`（輸出給程式讀）。
+- 出口碼：成功 0、上傳失敗 1、用法錯誤 2。
+
 ## 常見問題
 
 | 看到的訊息 | 怎麼辦 |
