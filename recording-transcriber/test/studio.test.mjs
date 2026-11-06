@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import * as ops from "../lib/cue-ops.mjs";
 import { icloudStudioDir, isOffline, markAiCues, parseSrt, projectDirFor, readProject, validateCues, writeProject } from "../lib/studio-project.mjs";
 import { copyToDriveIsolated } from "../lib/studio-drive.mjs";
@@ -200,6 +201,9 @@ test("studio refuses other hosts, cross-site origins and missing tokens", async 
   assert.equal(page.status, 200);
   assert.match(page.raw, /<meta name="studio-token" content="tok">/);
   assert.match(page.headers["content-security-policy"], /frame-ancestors 'none'/);
+  const csp = page.headers["content-security-policy"];
+  assert.match(csp, /script-src 'self'(;|$)/, "頁面沒有 inline script，script-src 不留 unsafe-inline（#163）");
+  assert.doesNotMatch(csp.match(/script-src[^;]*/)[0], /unsafe/);
   assert.equal((await s.req("GET", "/api/home")).status, 200);
 });
 
@@ -3419,4 +3423,17 @@ test("no subtitles (#158): upload sends the original, never captions; with cuts 
   assert.equal(s.calls.subtitles, false, "只剪接，不燒字幕");
   assert.equal(p.outputs.cut.file, "v-剪輯.mp4");
   assert.equal(g.captions.length, 0);
+});
+
+test("the Studio page has no inline script or inline handler, so script-src can stay 'self' (#163)", () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const files = ["web/studio.html", ...fs.readdirSync(path.join(root, "web", "studio")).filter((f) => f.endsWith(".js")).map((f) => `web/studio/${f}`)];
+  const hits = [];
+  for (const f of files) {
+    const text = fs.readFileSync(path.join(root, f), "utf8");
+    if (f.endsWith(".html") && /<script(?![^>]*\ssrc=)[^>]*>/i.test(text)) hits.push(`${f}: inline <script>`);
+    if (/\son[a-z]+\s*=\s*["'`]/i.test(text)) hits.push(`${f}: inline event handler`);
+    if (/javascript:/i.test(text)) hits.push(`${f}: javascript: URL`);
+  }
+  assert.deepEqual(hits, []);
 });

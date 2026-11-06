@@ -441,6 +441,11 @@ test("a missing Claude binary is reported, not a crash", async () => {
   s.close();
 });
 
+test("agents never inherit any ASR or download credential (#163)", () => {
+  const creds = { SONIOX_API_KEY: "a", CYCLONE_SONIOX_KEY_FILE: "/k", GROQ_API_KEY: "b", APIFY_TOKEN: "c", GROQ_CONFIG_JSON: "/g.json", APIFY_CONFIG_JSON: "/a.json" };
+  assert.deepEqual(agentEnv({ PATH: "/bin", HOME: "/h", ...creds }), { PATH: "/bin", HOME: "/h" });
+});
+
 test("agents never inherit the Soniox key", () => {
   const env = agentEnv({ PATH: "/bin", SONIOX_API_KEY: "secret", CYCLONE_SONIOX_KEY_FILE: "/k" });
   assert.deepEqual(env, { PATH: "/bin" });

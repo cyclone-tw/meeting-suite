@@ -72,7 +72,7 @@ export const redactPaths = (msg) => String(msg)
   .replace(/(^|[\s'"(（=])(?:~\/|\/(?!\/))[^\n:'"]+/g, "$1<path>");
 const logError = (msg) => console.error(redactPaths(msg));
 const escHtml = (t) => String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-const PAGE_CSP = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; media-src 'self'; img-src 'self' data: https://yt3.ggpht.com https://yt3.googleusercontent.com; connect-src 'self'; frame-ancestors 'none'";
+const PAGE_CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self'; img-src 'self' data: https://yt3.ggpht.com https://yt3.googleusercontent.com; connect-src 'self'; frame-ancestors 'none'";
 
 // 頁面拆出去的 CSS／JS（#50）：只服務這份清單上的檔，路徑整串比對，碰不到 web/ 以外
 const PAGE_ASSETS = new Map([

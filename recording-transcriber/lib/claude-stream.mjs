@@ -29,6 +29,8 @@ export function agentEnv(env = process.env) {
   const out = { ...env };
   delete out.SONIOX_API_KEY;
   delete out.CYCLONE_SONIOX_KEY_FILE;
+  // lib/keys.mjs 解析的其他憑證也一併清掉（#163）：逐字稿是不可信資料，agent 不該讀到任何金鑰
+  for (const k of ["GROQ_API_KEY", "APIFY_TOKEN", "GROQ_CONFIG_JSON", "APIFY_CONFIG_JSON"]) delete out[k];
   return out;
 }
 

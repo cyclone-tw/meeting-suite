@@ -215,13 +215,13 @@ if o == m:
 elif m <= o:
     print(f"copy {len(o - m)}")
 else:
-    print(f"extra {len(m - o)} " + "、".join(f"{w}→{r}" for _, w, r in sorted(m - o)[:10]))
+    print(f"extra {len(m - o)}")   # 只印組數：個人修正對可能含人名，不進終端機與記錄（#207）
 PYEOF
 )"
     case "${verdict}" in
       same) echo "對照同步：兩台一樣，不用動" ;;
       bad) note_fail "對照同步：有一台的 corrections.json 格式不對，沒有同步" ;;
-      extra*) note_fail "對照同步：${MINI} 有 ${verdict#extra } 這些 ${OCI} 沒有的對照，沒有覆蓋；先在 ${OCI} 的設定面板補上再跑" ;;
+      extra*) note_fail "對照同步：${MINI} 有 ${verdict#extra } 組 ${OCI} 沒有的對照，沒有覆蓋；先在 ${OCI} 的設定面板補上再跑" ;;
       copy*)
         if [ "${dry_run}" -eq 1 ]; then
           echo "對照同步：會把 ${OCI} 的對照複製到 ${MINI}（多 ${verdict#copy } 組，原檔先備份）"

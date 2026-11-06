@@ -371,3 +371,9 @@ test("a remote run writes exactly one wiki handoff on the MacBook, and so does t
   assert.equal(o.status, 0, o.stderr);
   assert.equal(fs.existsSync(off.toWiki), false);
 });
+
+test("harvest unpacks the remote tar without trusting its owner (#163)", () => {
+  // 解包走 /usr/bin/tar；來源是使用者自己設定的主機，仍不採用 tar 裡記的擁有者
+  const src = fs.readFileSync(CLIENT, "utf8");
+  assert.match(src, /"\/usr\/bin\/tar", \["-xf", "-", "--no-same-owner", "-C"/);
+});

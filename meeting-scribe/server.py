@@ -8,6 +8,7 @@
 
 import base64
 import bisect
+import collections
 import copy
 import functools
 import gzip
@@ -165,6 +166,14 @@ CORS_ALLOW_HEADERS = "Content-Type, X-Meeting-Scribe, Last-Event-ID"
 CORS_MAX_AGE = "600"
 _ORIGIN = re.compile(r"^(https?)://([a-z0-9.-]+|\[[0-9a-f:]+\])(:[0-9]{1,5})?$")
 _LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "[::1]")
+# Host 標頭白名單（DNS rebinding 防護，#207）：本機迴路、tailnet 的 *.ts.net、以及 config allowed_hosts 列的名稱
+_HOST_HEADER = re.compile(r"^(\[[0-9a-f:]+\]|[a-z0-9]([a-z0-9.-]*[a-z0-9])?)(:[0-9]{1,5})?$")
+_HOSTNAME = re.compile(r"^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$")
+TAILSCALE_USER_HEADER = "Tailscale-User-Login"   # tailscale serve 代發，帶發起連線的 tailnet 使用者
+SSE_MAX_CONNECTIONS = 64    # 同時開著的 SSE 連線上限（每條占一個 thread）
+SSE_WAIT_SECONDS = 10 * 60  # 等一場還沒開始的 session 最久這麼久，之後伺服器關連線（EventSource 會自己重連）
+SSE_WAIT_POLL = 5
+TOKEN_MAX_PER_MINUTE = 20   # POST /token 每分鐘最多發幾把臨時金鑰（每次都是對 Soniox 的真實呼叫）
 
 GLOSSARY_FILE = HERE / "config" / "glossary.md"
 TEMPLATES_DIR = HERE / "templates"    # 會議紀錄模板，一檔一種會議（檔名是 id）
@@ -339,6 +348,80 @@ def normalize_origin(value):
     if m.group(1) == "http" and m.group(2) not in _LOOPBACK_HOSTS:
         return None
     return origin
+
+
+def host_allowed(host, extra=frozenset()):
+    """Host 標頭是不是我們自己的名字（#207）：本機迴路、tailnet 的 *.ts.net、或 config allowed_hosts 列的。
+    瀏覽器被 DNS rebinding 騙去打本機時，Host 會是攻擊者的網域，伺服器端只有這一關擋得住。"""
+    host = (host or "").strip().lower()
+    m = _HOST_HEADER.match(host)
+    if not m:
+        return False
+    name = m.group(1)
+    if name in _LOOPBACK_HOSTS or name in extra:
+        return True
+    return name.endswith(".ts.net") and len(name) > len(".ts.net")
+
+
+def host_is_loopback(host):
+    m = _HOST_HEADER.match((host or "").strip().lower())
+    return bool(m) and m.group(1) in _LOOPBACK_HOSTS
+
+
+def load_allowed_hosts(config_file=None):
+    """config 的 allowed_hosts：除了本機與 *.ts.net 以外，還放行的主機名稱（例如自己的網域）。只收純主機名，不含埠。"""
+    items = _config_dict(config_file).get("allowed_hosts")
+    if not isinstance(items, list):
+        return frozenset()
+    return frozenset(x.strip().lower() for x in items if isinstance(x, str) and _HOSTNAME.match(x.strip().lower()))
+
+
+def load_tailscale_users(config_file=None):
+    """config 的 tailscale_users：允許使用的 tailnet 登入帳號（#207）。沒設就是空的，行為跟以前一樣。"""
+    items = _config_dict(config_file).get("tailscale_users")
+    if not isinstance(items, list):
+        return frozenset()
+    return frozenset(x.strip().lower() for x in items if isinstance(x, str) and x.strip())
+
+
+class ConnLimiter:
+    """同時連線數上限：acquire() 拿不到就回 False，用完 release()。"""
+
+    def __init__(self, limit):
+        self.limit, self.n, self.lock = limit, 0, threading.Lock()
+
+    def acquire(self):
+        with self.lock:
+            if self.n >= self.limit:
+                return False
+            self.n += 1
+            return True
+
+    def release(self):
+        with self.lock:
+            self.n = max(0, self.n - 1)
+
+
+class RateLimiter:
+    """滑動窗口速率限制：窗口內最多 limit 次。"""
+
+    def __init__(self, limit, window, clock=time.monotonic):
+        self.limit, self.window, self.clock = limit, window, clock
+        self.hits, self.lock = collections.deque(), threading.Lock()
+
+    def allow(self):
+        now = self.clock()
+        with self.lock:
+            while self.hits and now - self.hits[0] >= self.window:
+                self.hits.popleft()
+            if len(self.hits) >= self.limit:
+                return False
+            self.hits.append(now)
+            return True
+
+
+SSE_LIMIT = ConnLimiter(SSE_MAX_CONNECTIONS)
+TOKEN_LIMIT = RateLimiter(TOKEN_MAX_PER_MINUTE, 60)
 
 
 def load_cors_origins(config_file=None):
@@ -4572,6 +4655,8 @@ class Handler(BaseHTTPRequestHandler):
     hf_hub = None  # 測試用：模型快取位置
     captions = CaptionBoard()
     caption_keepalive = 15
+    sse_wait_seconds = SSE_WAIT_SECONDS
+    sse_wait_poll = SSE_WAIT_POLL
     drafts = DraftStore(DRAFTS_DIR)
 
     def parse_request(self):
@@ -4598,6 +4683,25 @@ class Handler(BaseHTTPRequestHandler):
         self._cors_verdict = verdict
         return verdict
 
+    def _access_reject(self):
+        """所有請求的第一關（#207）：Host 要是我們自己的名字（擋 DNS rebinding）；有設 tailscale_users 時，
+        經 tailscale serve 進來的請求要帶在清單內的 Tailscale-User-Login。沒帶身分標頭的只有本機直連（Host 是迴路）。"""
+        host = self.headers.get("Host")
+        if not host_allowed(host, load_allowed_hosts(self.config_file)):
+            self._json(403, {"error": "主機名稱不在允許清單"})
+            return True
+        users = load_tailscale_users(self.config_file)
+        if users:
+            login = self.headers.get(TAILSCALE_USER_HEADER)
+            if login is None:
+                ok = host_is_loopback(host)
+            else:
+                ok = login.strip().lower() in users
+            if not ok:
+                self._json(403, {"error": "這個 tailnet 帳號沒有使用權限"})
+                return True
+        return False
+
     def _cors_reject(self):
         """不在白名單的跨來源請求直接回 403（設了 cors_origins 才會發生）。"""
         if self._cors()[2]:
@@ -4615,6 +4719,8 @@ class Handler(BaseHTTPRequestHandler):
         super().end_headers()
 
     def do_OPTIONS(self):
+        if self._access_reject():
+            return
         enabled, allowed, _ = self._cors()
         if not enabled:
             # 沒設 cors_origins：跟以前沒有 do_OPTIONS 時一樣回 501
@@ -4673,7 +4779,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(status, json.dumps(self._localize(obj), ensure_ascii=False).encode(), "application/json; charset=utf-8")
 
     def do_GET(self):
-        if self._cors_reject():
+        if self._access_reject() or self._cors_reject():
             return
         path = self.path.split("?", 1)[0]
         if path == "/healthz":
@@ -4790,7 +4896,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, body, ctype, cache, headers)
 
     def do_POST(self):
-        if self._cors_reject():
+        if self._access_reject() or self._cors_reject():
             return
         path = self.path.split("?", 1)[0]
         if self.headers.get(CSRF_HEADER) != "1":
@@ -4884,6 +4990,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if not self.api_key:
             self._json(503, {"error": "伺服器沒有 Soniox 金鑰"})
+            return
+        if not TOKEN_LIMIT.allow():
+            self._json(429, {"error": "太頻繁了，請稍後再試"})
             return
         status, obj = mint_temp_key(self.api_key, opener=self.opener)
         self._json(status, obj)
@@ -5778,8 +5887,18 @@ class Handler(BaseHTTPRequestHandler):
         if not MEETING_ID.match(meeting):
             self._json(400, {"error": "會議代碼不合法"})
             return
+        if not SSE_LIMIT.acquire():
+            self._json(503, {"error": "連線太多，請稍後再試"})
+            return
+        try:
+            self._events_stream(hub, meeting)
+        finally:
+            SSE_LIMIT.release()
+
+    def _events_stream(self, hub, meeting):
         last_id = (self.headers.get("Last-Event-ID") or "").strip()
         seq = 0
+        waited = 0.0
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
@@ -5790,9 +5909,12 @@ class Handler(BaseHTTPRequestHandler):
                 session = hub.get(meeting)
                 if session is None:
                     # 還沒有第一段送來：先等，連線保持
+                    if waited >= self.sse_wait_seconds:
+                        return   # 等太久：關連線，不讓閒置連線永遠占著 thread（EventSource 會自己重連，#207）
                     self.wfile.write(b": waiting\n\n")
                     self.wfile.flush()
-                    time.sleep(5)
+                    time.sleep(self.sse_wait_poll)
+                    waited += self.sse_wait_poll
                     continue
                 if attached is not session:
                     # 第一次接上：照 Last-Event-ID 續傳；代碼是別的 session（服務重啟過）就從頭補送。
@@ -5973,6 +6095,15 @@ class Handler(BaseHTTPRequestHandler):
         if not MEETING_ID.match(channel):
             self._json(400, {"error": "頻道代碼不合法"})
             return
+        if not SSE_LIMIT.acquire():
+            self._json(503, {"error": "連線太多，請稍後再試"})
+            return
+        try:
+            self._caption_stream(channel)
+        finally:
+            SSE_LIMIT.release()
+
+    def _caption_stream(self, channel):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-store")

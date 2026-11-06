@@ -252,7 +252,9 @@ class DeployAllTest(unittest.TestCase):
         r = self.run_deploy("--only", "corrections", FAKE_CORR_OCI='{"hints": [["a", "b"]]}',
                             FAKE_CORR_MINI='{"hints": [["a", "b"], ["思語", "詩妤"]]}')
         self.assertEqual(r.returncode, 1)
-        self.assertIn("思語→詩妤", r.stderr)
+        self.assertNotIn("思語", r.stderr, "個人修正對可能含人名，只印組數（#207）")
+        self.assertNotIn("詩妤", r.stderr)
+        self.assertIn("有 1 組", r.stderr)
         self.assertNotIn("corr-write", self.step_names())
 
     def test_corrections_same_means_no_write(self):

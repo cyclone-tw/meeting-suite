@@ -208,7 +208,7 @@ function runRemote(opts, source, jobId, localPackage, report) {
   const pack = ssh(opts.host, ["pack", jobId], { binary: true, timeoutSeconds: 600 });
   if (pack.status !== 0 || !pack.stdout?.length) throw new Error("harvest failed: could not pack the remote package");
   fs.mkdirSync(localPackage, { recursive: true });
-  const untar = spawnSync("/usr/bin/tar", ["-xf", "-", "-C", localPackage], { input: pack.stdout });
+  const untar = spawnSync("/usr/bin/tar", ["-xf", "-", "--no-same-owner", "-C", localPackage], { input: pack.stdout });
   if (untar.status !== 0) throw new Error("harvest failed: could not unpack the remote package");
   if (!fs.existsSync(path.join(localPackage, "manifest.json")) || !hasTranscript(localPackage)) {
     throw new Error("harvest failed: pulled package has no transcript");
