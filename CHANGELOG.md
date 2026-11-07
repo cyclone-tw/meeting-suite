@@ -2,9 +2,14 @@
 
 版本規則：別人升級後要動手才能繼續用（設定、存檔格式、拿掉功能、最低版本）升大版號；新功能升小版號；修正與文件升修補號。0.x 期間大版號降為小版號。
 
-## v0.5.1（2026-11-06）
+## v0.6.0（2026-11-07）
 
-### 修正
+### 新功能
+
+- codex isolation, media token, shared-component pin, CI hardening, SECURITY.md
+- tailnet identity on by default at install, SSE wakeups, ruff, free e2e ports
+
+## v0.5.1（2026-11-07）
 
 - harden agent env, Studio CSP and remote harvest; guard test list
 - Host allowlist, tailnet identity, SSE and token limits

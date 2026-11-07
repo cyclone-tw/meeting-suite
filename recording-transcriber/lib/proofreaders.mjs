@@ -16,14 +16,49 @@ import { agentEnv, claudeBin, newUsage, openClaude } from "./claude-stream.mjs";
 
 const bin = (name, envKey) => process.env[envKey] || name;
 
+// codex 唯讀 sandbox 仍然讀得到整台電腦的檔案（包含金鑰檔），所以和會議轉錄 App 的 Codex 備援一樣，
+// 把跑指令、外掛、瀏覽器之類的工具關掉，只讓它回文字（#165）。名稱隨 codex 版本變動：
+// 這版不認得的略過，但跑指令的開關（SHELL_SWITCHES）一個都不認得、或查不到功能清單，就拒絕：寧可不校對也不開著 shell。
+const CODEX_DISABLE = ["shell_tool", "unified_exec", "apps", "plugins", "browser_use", "computer_use", "in_app_browser"];
+const SHELL_SWITCHES = ["shell_tool", "unified_exec"];
+
+function listCodexFeatures(cmd) {
+  const r = spawnSync(cmd, ["features", "list"], { encoding: "utf8", timeout: 15000, env: agentEnv() });
+  if (r.error || r.status !== 0) return null;
+  return String(r.stdout).split("\n").map((l) => l.trim().split(/\s+/)[0]).filter(Boolean);
+}
+
+export function codexDisableArgs(listFeatures) {
+  const known = listFeatures();
+  // 查不到功能清單就拒絕，不猜（舊版 codex 可能把不認得的 --disable 當警告略過，shell 就悄悄開著）
+  if (!known) throw new Error("cannot list codex features (codex features list failed); refusing to run without verifying the shell tool is switched off");
+  const names = CODEX_DISABLE.filter((n) => known.includes(n));
+  if (!names.some((n) => SHELL_SWITCHES.includes(n))) {
+    throw new Error("this codex version does not list the shell tool switches (shell_tool, unified_exec); update CODEX_DISABLE in lib/proofreaders.mjs or use another proofreader");
+  }
+  return names.flatMap((n) => ["--disable", n]);
+}
+
+const codexFeatureCache = new Map();
+const codexFeatures = (cmd) => {
+  if (codexFeatureCache.has(cmd)) return codexFeatureCache.get(cmd);
+  const list = listCodexFeatures(cmd);
+  if (list) codexFeatureCache.set(cmd, list);   // 失敗（逾時之類）不快取：下次校對再試，不讓一次失敗拒絕整個 Studio 行程的壽命
+  return list;
+};
+
 // 每個 preset：(prompt, workdir, outFile) → { cmd, args, input?, readOut? }
 export const PRESETS = {
-  codex: (prompt, dir, outFile) => ({
-    cmd: bin("codex", "CYCLONE_CODEX_BIN"),
-    args: ["exec", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only", "-c", "mcp_servers={}", "-o", outFile],
-    input: prompt,
-    readOut: true,
-  }),
+  codex: (prompt, dir, outFile) => {
+    const cmd = bin("codex", "CYCLONE_CODEX_BIN");
+    return {
+      cmd,
+      args: ["exec", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules", "--sandbox", "read-only",
+        "-c", "mcp_servers={}", "-c", 'web_search="disabled"', ...codexDisableArgs(() => codexFeatures(cmd)), "-o", outFile],
+      input: prompt,
+      readOut: true,
+    };
+  },
   cursor: (prompt, dir) => ({
     cmd: bin("cursor-agent", "CYCLONE_CURSOR_BIN"),
     args: ["-p", "--output-format", "text", "--mode", "ask", "--trust", "--workspace", dir, prompt],

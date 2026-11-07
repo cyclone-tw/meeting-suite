@@ -2,7 +2,6 @@
 
 用假的 ssh 跑：每個遠端命令開頭有 `: step=<名稱>;`，假 ssh 把 (主機, 步驟) 記下來，照環境變數回答。
 """
-import hashlib
 import json
 import os
 import shutil

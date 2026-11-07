@@ -1,0 +1,28 @@
+name: e2e
+
+# meeting-scribe 的瀏覽器端到端測試（真的 server.py＋無頭 Chrome，約數分鐘）。
+# 不跟每次 push 跑（慢）；每天一次，也可以在 Actions 頁面手動執行。
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: ffmpeg
+        run: brew install ffmpeg
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Google Chrome is installed
+        run: test -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+      - name: e2e
+        working-directory: meeting-scribe
+        run: node tests/e2e/run.mjs

@@ -253,11 +253,11 @@ test("video streams with byte ranges for seeking", async (t) => {
   const { id } = (await s.req("POST", "/api/open", { body: { video: s.video, privacy: "public" } })).json;
   await s.waitFor(id, (x) => x.status === "ready");
   assert.equal((await s.req("GET", `/api/projects/${id}/video`, { headers: { "X-Studio-Token": "" } })).status, 403);
-  const r = await s.req("GET", `/api/projects/${id}/video?t=tok`, { headers: { "X-Studio-Token": "", Range: "bytes=4-7" } });
+  const r = await s.req("GET", `/api/projects/${id}/video?t=tok`, { headers: { "Sec-Fetch-Dest": "video", "X-Studio-Token": "", Range: "bytes=4-7" } });
   assert.equal(r.status, 206);
   assert.equal(r.raw, "4567");
   assert.equal(r.headers["content-range"], "bytes 4-7/16");
-  assert.equal((await s.req("GET", `/api/projects/${id}/video?t=tok`, { headers: { Range: "bytes=99-" } })).status, 416);
+  assert.equal((await s.req("GET", `/api/projects/${id}/video?t=tok`, { headers: { "Sec-Fetch-Dest": "video", Range: "bytes=99-" } })).status, 416);
 });
 
 test("the recognition result stays in the project, so a retry or a reprocess does not pay again", async (t) => {
@@ -365,12 +365,12 @@ test("non-mp4 videos get a preview copy that survives burning and comes back aft
   assert.equal(s.calls.remux, 1);
   assert.equal((await s.req("POST", `/api/projects/${id}/burn`)).status, 200);
   await s.waitFor(id, (x) => x.burn?.status === "done");
-  const v1 = await s.req("GET", `/api/projects/${id}/video?t=tok`, { headers: { "X-Studio-Token": "" } });
+  const v1 = await s.req("GET", `/api/projects/${id}/video?t=tok`, { headers: { "Sec-Fetch-Dest": "video", "X-Studio-Token": "" } });
   assert.equal(v1.raw, "preview-mp4", "燒完預覽還在");
   assert.equal((await s.req("POST", `/api/projects/${id}/forget`)).status, 200);
   const again = await s.req("POST", "/api/open", { body: { video: mkv, privacy: "public" } });
   assert.equal(again.json.reopened, true);
-  const v2 = await s.req("GET", `/api/projects/${again.json.id}/video?t=tok`, { headers: { "X-Studio-Token": "" } });
+  const v2 = await s.req("GET", `/api/projects/${again.json.id}/video?t=tok`, { headers: { "Sec-Fetch-Dest": "video", "X-Studio-Token": "" } });
   assert.equal(v2.status, 200);
   assert.equal(s.calls.remux, 2, "預覽被刪了就重做");
 });
@@ -399,7 +399,7 @@ test("rebuilding a preview survives autosaves and concurrent video requests", as
   const { id } = (await s.req("POST", "/api/open", { body: { video: mkv, privacy: "public" } })).json;
   const p = await s.waitFor(id, (x) => x.status === "ready");
   fs.rmSync(path.join(projectDirFor(fs.realpathSync(mkv)), ".preview.mp4"));
-  const vid = () => s.req("GET", `/api/projects/${id}/video?t=tok`, { headers: { "X-Studio-Token": "" } });
+  const vid = () => s.req("GET", `/api/projects/${id}/video?t=tok`, { headers: { "Sec-Fetch-Dest": "video", "X-Studio-Token": "" } });
   const [a, b, put] = await Promise.all([vid(), vid(), (async () => {
     await new Promise((r) => setTimeout(r, 40));
     return s.req("PUT", `/api/projects/${id}`, { body: { rev: p.rev, cues: p.cues } });
@@ -1248,7 +1248,7 @@ test("previewing a video before opening it: playback, thumbnails and waveform, n
   assert.ok(Math.abs(pv.json.duration_ms - 8000) < 100);
   assert.equal(pv.json.playable, true);
   assert.equal((await s.req("GET", `/api/preview/${pv.json.id}/video`, { headers: { "X-Studio-Token": "", Range: "bytes=0-9" } })).status, 403, "影片也要 token");
-  const vid = await s.req("GET", `/api/preview/${pv.json.id}/video?t=tok`, { headers: { Range: "bytes=0-9" } });
+  const vid = await s.req("GET", `/api/preview/${pv.json.id}/video?t=tok`, { headers: { "Sec-Fetch-Dest": "video", Range: "bytes=0-9" } });
   assert.equal(vid.status, 206);
   const thumbs = await s.req("GET", `/api/preview/${pv.json.id}/thumbs`);
   const tiles = thumbs.raw.trim().split("\n").map((l) => JSON.parse(l));
@@ -2408,7 +2408,7 @@ test("the meeting app's shared components are served from its checkout, only by 
   fs.mkdirSync(path.join(scribe, "web", "shared"), { recursive: true });
   fs.writeFileSync(path.join(scribe, "web", "shared", "md.js"), "window.MdView = 1;");
   fs.writeFileSync(path.join(scribe, "web", "shared", "secret.js"), "nope");
-  const s = await startStudio(t, { env: { CYCLONE_MEETING_SCRIBE_DIR: scribe } });
+  const s = await startStudio(t, { env: { CYCLONE_MEETING_SCRIBE_DIR: scribe }, deps: { sharedPin: () => null } });   // 公開版有 shared-pin.json，這裡不測釘選
   const ok = await s.req("GET", "/shared/md.js");
   assert.equal(ok.status, 200);
   assert.equal(ok.raw, "window.MdView = 1;");
@@ -2457,6 +2457,7 @@ test("an edited mind map is saved back as mindmap.md, .opml and .svg, checked fi
 test("without the App's shared file format nothing is generated or written, and the version check compares this checkout with the host (#116)", async (t) => {
   let asked = 0;
   const s = await startStudio(t, { deps: {
+    sharedPin: () => null,   // 公開版有 shared-pin.json；這個測試不測釘選
     videoDurationMs: () => 10_000,
     recapFiles: () => { throw new Error("找不到會議轉錄 App 的共用存檔格式（這台的 meeting-scribe 程式），先不寫檔"); },
     async meetingRecap() { asked += 1; return { intro: "導言", full: "", short: "", chapters: [] }; },
@@ -2477,7 +2478,7 @@ test("without the App's shared file format nothing is generated or written, and 
   const p = (await s.req("GET", `/api/projects/${id}`)).json;
   assert.equal(fs.readFileSync(path.join(p.folder, "mindmap.md"), "utf8"), "# 心智圖：主題\n", "結尾只有一個換行");
   const v = await s.req("GET", "/api/shared-version");
-  assert.deepEqual(v.json, { local: "aaaa1111", remote: "bbbb2222", same: false });
+  assert.deepEqual(v.json, { local: "aaaa1111", remote: "bbbb2222", same: false, pinned: false });
 });
 
 test("the real RecapFiles from this Mac's meeting-scribe checkout, when present, gives the same summary.md and -2 names (#116)", async (t) => {
@@ -3436,4 +3437,49 @@ test("the Studio page has no inline script or inline handler, so script-src can 
     if (/javascript:/i.test(text)) hits.push(`${f}: javascript: URL`);
   }
   assert.deepEqual(hits, []);
+});
+
+test("the ?t= media token is only accepted on browser media loads (#165)", async (t) => {
+  const s = await startStudio(t);
+  const { id } = (await s.req("POST", "/api/open", { body: { video: s.video, privacy: "public" } })).json;
+  await s.waitFor(id, (x) => x.status === "ready");
+  const url = `/api/projects/${id}/video?t=tok`;
+  const get = (dest, extra = {}) => s.req("GET", url, { headers: { "X-Studio-Token": "", ...(dest === null ? {} : { "Sec-Fetch-Dest": dest }), ...extra } });
+  for (const dest of [null, "empty", "document", "script", "image", "iframe", "style", "worker", "track"]) {
+    assert.equal((await get(dest)).status, 403, `Sec-Fetch-Dest=${dest} 不能用網址上的 token`);
+  }
+  for (const dest of ["video", "audio"]) assert.equal((await get(dest, { Range: "bytes=0-3" })).status, 206, dest);
+  // 標頭 token 照舊可用在任何請求（fetch 也行）
+  assert.notEqual((await s.req("GET", `/api/projects/${id}/video`, { headers: { "Sec-Fetch-Dest": "empty" } })).status, 403);
+  // 其他 API 路徑本來就不收網址 token
+  assert.equal((await s.req("GET", "/api/home?t=tok", { headers: { "X-Studio-Token": "", "Sec-Fetch-Dest": "video" } })).status, 403);
+});
+
+test("shared components are refused when a shipped pin does not match what is on disk (#165)", async (t) => {
+  const scribe = fs.mkdtempSync(path.join(os.tmpdir(), "rt-scribe-pin-"));
+  t.after(() => fs.rmSync(scribe, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(scribe, "web", "shared"), { recursive: true });
+  fs.writeFileSync(path.join(scribe, "web", "shared", "md.js"), "window.MdView = 1;");
+  fs.writeFileSync(path.join(scribe, "web", "shared", "ext.js"), "window.ExtPanel = 1;");
+  const pin = { schema: 1, files: { "md.js": createHash("sha256").update("window.MdView = 1;").digest("hex"), "ext.js": createHash("sha256").update("something else").digest("hex") } };
+  const s = await startStudio(t, { env: { CYCLONE_MEETING_SCRIBE_DIR: scribe }, deps: { sharedPin: () => pin } });
+  assert.equal((await s.req("GET", "/shared/md.js")).status, 200, "和釘的一樣就供應");
+  const bad = await s.req("GET", "/shared/ext.js");
+  assert.equal(bad.status, 409, "被改過或版本對不上就拒絕");
+  assert.match(bad.json.error, /共用元件/);
+  assert.ok(!bad.raw.includes("ExtPanel"), "拒絕時不能把內容送出去");
+  fs.writeFileSync(path.join(scribe, "web", "shared", "icons.js"), "x");
+  assert.equal((await s.req("GET", "/shared/icons.js")).status, 409, "不在釘的清單上也拒絕");
+  const v = await s.req("GET", "/api/shared-version");
+  assert.equal(v.json.pinned, true);
+});
+
+test("without a pin (private checkouts) shared components are served as before (#165)", async (t) => {
+  const scribe = fs.mkdtempSync(path.join(os.tmpdir(), "rt-scribe-nopin-"));
+  t.after(() => fs.rmSync(scribe, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(scribe, "web", "shared"), { recursive: true });
+  fs.writeFileSync(path.join(scribe, "web", "shared", "md.js"), "window.MdView = 1;");
+  const s = await startStudio(t, { env: { CYCLONE_MEETING_SCRIBE_DIR: scribe }, deps: { sharedPin: () => null } });
+  assert.equal((await s.req("GET", "/shared/md.js")).status, 200);
+  assert.equal((await s.req("GET", "/api/shared-version")).json.pinned, false);
 });

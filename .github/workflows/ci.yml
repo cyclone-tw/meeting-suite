@@ -14,7 +14,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: ffmpeg
-        run: brew install ffmpeg
+        # ffmpeg-full 才有 libass（燒字幕）；只裝 ffmpeg 的話，燒字幕的測試會被靜默略過，等於沒驗證到
+        # 測試自己會找 /opt/homebrew/opt/ffmpeg-full/bin/ffmpeg（見 scripts/subtitle-run.mjs），不需要放進 PATH；兩個 formula 可以並存
+        run: brew install ffmpeg ffmpeg-full
+      - name: ffmpeg-full has libass
+        run: |
+          "$(brew --prefix ffmpeg-full)/bin/ffmpeg" -hide_banner -filters | grep -q ' subtitles ' \
+            || { echo "::error::ffmpeg-full 沒有 libass（subtitles 濾鏡），燒字幕的測試會被略過"; exit 1; }
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: recording-transcriber/package.json
@@ -28,6 +34,12 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm test
+      - name: lint (ruff, pyflakes only)
+        working-directory: meeting-scribe
+        run: |
+          python3 -m venv "$RUNNER_TEMP/ruff"
+          "$RUNNER_TEMP/ruff/bin/pip" install --quiet ruff==0.17.4
+          "$RUNNER_TEMP/ruff/bin/ruff" check .
       - name: meeting-scribe
         working-directory: meeting-scribe
         run: python3 -m unittest discover -s tests

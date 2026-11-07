@@ -1,6 +1,7 @@
 // e2e 共用：開測試服務、開無頭 Chrome、用 CDP 在頁面裡執行程式。只用 Node 內建（Node 22 以上有 WebSocket）。
 import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,6 +25,15 @@ export function makeWav(file, { secs = 10, on = 400, off = 300, amp = 6000 } = {
   h.writeUInt32LE(sr * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write("data", 36); h.writeUInt32LE(data.length, 40);
   fs.writeFileSync(file, Buffer.concat([h, data]));
   return file;
+}
+
+// 向系統要一個真的空閒的埠（不是隨機猜一個，猜到別人在用的就撞車，#187）
+export function freePort() {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.on("error", reject);
+    srv.listen(0, "127.0.0.1", () => { const { port } = srv.address(); srv.close(() => resolve(port)); });
+  });
 }
 
 // Chrome 被關掉後還會寫一下 profile：刪資料夾時重試幾次，不然偶爾 ENOTEMPTY 讓情境假失敗
@@ -79,7 +89,8 @@ export async function startStatic(port, dir) {
 // init：每次載入頁面前先在頁面裡執行的程式（換掉外部服務用，#105）；before(page)：第一次打開網址前先做（例如開 CDP 功能）
 // args：額外的 Chrome 參數（例如把某個 port 當成公開網路，#106）
 // lang：瀏覽器語言（#195 介面跟著它走）；預設中文，其他情境的中文斷言才對得上
-export async function openPage(url, { wav, init, before, args: extra = [], lang = "zh-TW", port = 9400 + Math.floor(Math.random() * 400) } = {}) {
+export async function openPage(url, { wav, init, before, args: extra = [], lang = "zh-TW", port } = {}) {
+  if (!port) port = await freePort();
   const dir = tmpdir("chrome");
   const args = ["--headless=new", `--remote-debugging-port=${port}`, `--user-data-dir=${dir}`, "--no-first-run",
     "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", "--autoplay-policy=no-user-gesture-required",

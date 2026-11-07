@@ -58,6 +58,10 @@ if [ ! -f "${CONFIG}" ]; then
   as_user sh -c "umask 077; printf '%s\n' '{\"agent_fallback\": \"codex\", \"max_concurrent_agents\": 2}' > '${CONFIG}'"
   echo "建立 ${CONFIG}"
 fi
+# 預設只放行安裝者自己的 tailnet 帳號（#209）：設定檔沒有 tailscale_users 才填；已有的（含空清單）不動
+# 輸出先收進變數：tailscale 沒登入也好、helper 不讀完就結束也好，都不能在 pipefail 下讓安裝中止
+TS_JSON="$(tailscale status --self --json 2>/dev/null || true)"
+printf '%s' "${TS_JSON}" | as_user "${PYTHON}" -I "${REPO}/deploy/ensure-tailnet-users.py" "${CONFIG}"
 
 # 環境檔：root 600。沒有就建一份只有說明的空檔
 install -d -m 700 -o root -g root "${ENV_DIR}"

@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "files": {
+    "ext.css": "3fd059232d8473a8953ea8f3d4572f51547353d32df494235acf9971e9176038",
+    "ext.js": "6dc33753a6a0dfdf61e51202cfba0f464dad5f3ba9f2c7dced621bbd8ebc36bb",
+    "i18n.js": "a3bcbd8f533b0883ae8804abc60079c3afabb1f52daf06327dbbf3dfae04d3a7",
+    "icons.js": "9f16a207c58a96d312a65d597719089e89f6eda35180f709ab987021b192eec4",
+    "lang-en.js": "96a58b0aa28feb1c6b559e3238bbbab2d13791866d7ec397afdfafc0354f14a3",
+    "md.css": "e74637c8a3c647820f524efe991fb13501cc4b0a2db146d52f5c7667a39a710a",
+    "md.js": "1fb6b4152dbb309923df1023ea1e74795d7169e4e6de503a04fa6416cd793948",
+    "mindmap.css": "b4248ad7ac04b694f7b85d1e27324ec51e5ab02e6c27dc4c2a41501c7a47e05d",
+    "mindmap.js": "c5bdc6ecd08ef71649b6be48cf0b0dd91c04bf31a6e8fb66912a460491d934b0",
+    "recap-files.js": "157856921ac046ef571c9db41d838a56e90d1e009820a9dd30320fd5289cbfe3"
+  },
+  "scripts": {
+    "deploy/build-pages.py": "da37f3a07489ea1ac9ee8cccc07b7b5f6dd105d653ed9c5e2d13f702e0f32034"
+  }
+}

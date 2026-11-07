@@ -5,12 +5,11 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { assert, buildPages, makeWav, openPage, PY, ROOT, sleep, startServer, startStatic, stopServer, tmpdir } from "./lib.mjs";
+import { assert, buildPages, freePort, makeWav, openPage, PY, ROOT, sleep, startServer, startStatic, stopServer, tmpdir } from "./lib.mjs";
 
 const fixtures = tmpdir("wav");
 const SPEECH = makeWav(path.join(fixtures, "speech.wav"), { secs: 10 });
 const SILENT = makeWav(path.join(fixtures, "silent.wav"), { secs: 10, amp: 0 });
-let nextPort = 18300 + Math.floor(Math.random() * 500);
 
 // 每個情境自己開服務與瀏覽器；ctx = { port, work, server, page, url }
 // 正在跑的服務與瀏覽器：失敗或 Ctrl-C 時也要收乾淨，不留孤兒程序與暫存資料夾
@@ -20,7 +19,7 @@ process.on("SIGINT", async () => { await cleanupAll(); fs.rmSync(fixtures, { rec
 
 // pre(work)：開服務前先準備 WORKDIR；init／before 傳給 openPage；host 換成 localhost 才能用 passkey（WebAuthn 不接受 IP）
 async function withEnv(fn, { wav = SPEECH, pre, init, before, host = "127.0.0.1", lang } = {}) {
-  const port = nextPort++, work = tmpdir("work");
+  const port = await freePort(), work = tmpdir("work");
   const ctx = { port, work, url: `http://${host}:${port}/` };
   const cleanup = async () => {
     if (ctx.page) await ctx.page.close();
@@ -261,7 +260,7 @@ const dropWav = (p, name, secs = 3) => p.ev(`(() => {
 // allow=false：主機的 cors_origins 不列這個網頁來源
 // cdp(cdp, ctx)：開頁前多做的 CDP 設定（例如攔下送往主機的請求，模擬手機沒開 Tailscale，#178）
 async function pagesEnv(fn, { allow = true, google = false, cdp: extraCdp } = {}) {
-  const apiPort = nextPort++, pagePort = nextPort++, work = tmpdir("work");
+  const apiPort = await freePort(), pagePort = await freePort(), work = tmpdir("work");
   const apiOrigin = `http://127.0.0.1:${apiPort}`, pageOrigin = `http://127.0.0.1:${pagePort}`;
   const reqs = [];
   const ctx = { port: apiPort, work, apiOrigin, pageOrigin, reqs, url: pageOrigin + "/" };

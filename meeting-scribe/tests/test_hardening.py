@@ -210,5 +210,68 @@ class HardenedHttpTest(unittest.TestCase):
         self.assertEqual(self.req("/token", "POST")[0], 200)
 
 
+
+class HubWakeupTest(unittest.TestCase):
+    """等還沒開始的 session 時，session 一建立就被叫醒，不是睡滿輪詢間隔才發現（#209）。"""
+
+    class Stub:
+        def __init__(self, mid):
+            self.mid, self.closed = mid, False
+            self.last_activity = __import__("time").monotonic()
+
+        def idle(self, now):
+            return False
+
+        def close(self):
+            self.closed = True
+
+    def test_wait_for_session_returns_as_soon_as_it_is_created(self):
+        import time
+        hub = server.AgentHub(factory=self.Stub)
+        got = []
+        t0 = time.monotonic()
+        waiter = threading.Thread(target=lambda: got.append(hub.wait_for_session("m1", 30)))
+        waiter.start()
+        time.sleep(0.2)
+        hub.get("m1", create=True)
+        waiter.join(5)
+        self.assertFalse(waiter.is_alive(), "30 秒的等待要被建立動作叫醒")
+        self.assertLess(time.monotonic() - t0, 5)
+        self.assertEqual(got[0].mid, "m1")
+
+    def test_wait_for_session_times_out_with_none(self):
+        hub = server.AgentHub(factory=self.Stub)
+        self.assertIsNone(hub.wait_for_session("nobody", 0.1))
+
+    def test_closed_stub_also_wakes_waiters(self):
+        import time
+        hub = server.AgentHub(factory=self.Stub)
+        got = []
+        waiter = threading.Thread(target=lambda: got.append(hub.wait_for_session("m2", 30)))
+        waiter.start()
+        time.sleep(0.2)
+        hub.closed_stub("m2")
+        waiter.join(5)
+        self.assertFalse(waiter.is_alive())
+        self.assertTrue(got[0].closed)
+
+    def test_a_session_that_is_registered_but_not_returned_still_waits(self):
+        # 登記著、但 get 因為「關掉很久」而清掉不給：不能立刻回 None 讓 SSE 迴圈空轉
+        import time
+        hub = server.AgentHub(factory=self.Stub)
+        old = self.Stub("m3")
+        old.closed, old.last_activity = True, -10 ** 9
+        hub.sessions["m3"] = old
+        t0 = time.monotonic()
+        self.assertIsNone(hub.wait_for_session("m3", 0.4))
+        self.assertGreaterEqual(time.monotonic() - t0, 0.3, "要真的睡滿，不是立刻回來")
+
+    def test_events_loop_waits_on_the_hub_not_on_a_sleep(self):
+        src = Path(server.__file__).read_text(encoding="utf-8")
+        body = src[src.index("def _events_stream"):src.index("def _draft_post")]
+        self.assertIn("wait_for_session", body)
+        self.assertNotIn("time.sleep", body)
+
+
 if __name__ == "__main__":
     unittest.main()

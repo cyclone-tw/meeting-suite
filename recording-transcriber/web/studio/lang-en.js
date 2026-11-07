@@ -359,6 +359,7 @@ window.StudioLangEN = Object.freeze({
  "這支影片之前做過字幕；要改用字幕檔，先在首頁按「整理…」清掉這支的處理資料": "Subtitles were made for this video before; to use a subtitle file instead, first clean up this video's working files with \"Clean up...\" on the home page",
  "這支影片正在處理，等處理完再改成含個資": "This video is being processed; wait until it finishes before marking it as containing personal data",
  "找不到會議轉錄 App 的共用元件": "Could not find the shared components of the meeting transcription app",
+ "共用元件和這個版本釘的不一致，不供應：{reason}。meeting-scribe 和 recording-transcriber 要更新到同一個版本。": "The shared components do not match what this release pins, so they are not served: {reason}. Update meeting-scribe and recording-transcriber to the same release.",
  "名冊裡沒有這個帳號": "This account is not in the roster",
  "這不是 YouTube 影片的網址": "This is not a YouTube video URL",
  "這台電腦沒有 yt-dlp，沒辦法下載 YouTube 影片": "This computer does not have yt-dlp, so YouTube videos cannot be downloaded",

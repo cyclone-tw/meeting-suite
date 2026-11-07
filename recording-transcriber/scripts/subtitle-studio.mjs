@@ -37,6 +37,7 @@ import { addCorrection, addCorrections, correctionsCacheFile, correctionsSummary
 import { loadAsrProfile } from "../lib/asr-profile.mjs";
 import { copyToDriveIsolated, driveDisabled, driveWhere, recordingStamp } from "../lib/studio-drive.mjs";
 import { loadRecapFiles, localBuild } from "../lib/shared-components.mjs";
+import { loadPin, verifyShared } from "../lib/shared-pin.mjs";
 import { cleanMindmapReply, safeMindmapSvg, moduleKey, moduleLabel, recapTranscript, scribeDir, recapKey, recapParagraphs, requestModule, requestModules, requestRecap, resolveModuleOptions } from "../lib/meeting-recap.mjs";
 import { resolveSonioxKey } from "../lib/soniox-async.mjs";
 import { buildCues, cueOptsFor, toSrt } from "../lib/subtitle-text.mjs";
@@ -72,6 +73,9 @@ export const redactPaths = (msg) => String(msg)
   .replace(/(^|[\s'"(（=])(?:~\/|\/(?!\/))[^\n:'"]+/g, "$1<path>");
 const logError = (msg) => console.error(redactPaths(msg));
 const escHtml = (t) => String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+// 錯誤訊息截成給人看的長度（原本到處重寫 String(e?.message || e).slice(0, n)）
+const errText = (e, max = 300) => String(e?.message || e).slice(0, max);
+
 const PAGE_CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self'; img-src 'self' data: https://yt3.ggpht.com https://yt3.googleusercontent.com; connect-src 'self'; frame-ancestors 'none'";
 
 // 頁面拆出去的 CSS／JS（#50）：只服務這份清單上的檔，路徑整串比對，碰不到 web/ 以外
@@ -171,9 +175,9 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       const r = await d.driveCopy({ override: env.CYCLONE_STUDIO_DRIVE_DIR, profile: loadAsrProfile().profile.studio_drive || {}, home: os.homedir(), existing: p.drive?.folder, name: p.name, stamp: recordingStamp(p.name, sourceVideo(p)), files });
       drive = { root: r.root, folder: r.folder, files: r.files, saved: new Date().toISOString() };
     } catch (e) {
-      logError(`[studio] drive save failed: ${String(e?.message || e).slice(0, 200)}`);
+      logError(`[studio] drive save failed: ${errText(e, 200)}`);
       const { pending, ...prev } = p.drive || {};
-      drive = { ...prev, ...(e.folder ? { folder: e.folder, root: e.root || prev.root } : {}), error: String(e?.message || e).slice(0, 200), failed: new Date().toISOString() };
+      drive = { ...prev, ...(e.folder ? { folder: e.folder, root: e.root || prev.root } : {}), error: errText(e, 200), failed: new Date().toISOString() };
     }
     const latest = readProject(dir);   // 存 Drive 的時候可能有人改了字：只換 drive
     latest.drive = drive;
@@ -199,10 +203,10 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
     // 會後總結（#80）：送到會議轉錄 App 產生，和 App 同一份提示詞
     driveDisabled: () => driveDisabled(env, loadAsrProfile().profile),
     // 會後內容的存檔格式是 App 的共用元件 RecapFiles（#116），從這台 meeting-scribe checkout 載入
-    recapFiles: () => loadRecapFiles(scribeDir(env)),
+    recapFiles: () => loadRecapFiles(scribeDir(env), { pin: d.sharedPin() }),
     sharedBuilds: async () => {
       const [local, remote] = await Promise.allSettled([
-        localBuild(scribeDir(env)),
+        localBuild(scribeDir(env), { pin: d.sharedPin() }),
         (async () => { const url = meetingScribeUrl(env); if (!url) throw new Error("沒有設定主機"); const r = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(8000) }); return String((await r.json())?.build || ""); })(),
       ]);
       return { local: local.status === "fulfilled" ? local.value : "", remote: remote.status === "fulfilled" ? remote.value : "" };
@@ -231,6 +235,7 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       // brctl 的錯誤很長；只取引號裡那句說明，例如 "Path is outside of any CloudDocs app library, will never sync"
       p.on("close", (code) => { if (code) onFail(err.match(/"([^"]+)"/)?.[1] || err.trim().split("\n")[0] || `brctl exit ${code}`); });
     },
+    sharedPin: () => loadPin(TOOL_ROOT),
     ...deps,
   };
   const projects = new Map();   // id → 專案資料夾
@@ -273,7 +278,10 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
     // 打開頁面本身可以從別處連過來（書籤、擴充功能）；API 一律不接受跨站請求
     if (!url.pathname.startsWith("/api/")) return true;
     if (req.headers["sec-fetch-site"] === "cross-site") return false;
-    const sent = req.headers["x-studio-token"] || (req.method === "GET" && /\/video$/.test(url.pathname) ? url.searchParams.get("t") : "");
+    // <video> 標籤不能帶標頭，所以影片網址可以用 ?t=。但只收瀏覽器真的在載入媒體的請求（Sec-Fetch-Dest 是瀏覽器自己填的，
+    // 頁面的 script 改不了）：fetch、<img>、<script>、整頁導覽或不帶這個標頭的請求，拿到網址也不能用（#165）
+    const mediaLoad = ["video", "audio"].includes(String(req.headers["sec-fetch-dest"] || ""));
+    const sent = req.headers["x-studio-token"] || (req.method === "GET" && mediaLoad && /\/video$/.test(url.pathname) ? url.searchParams.get("t") : "");
     return safeEqual(sent, token);
   }
 
@@ -332,7 +340,7 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
   // 背景工作：例外不能讓整個服務掛掉，也不能讓 jobs 卡住
   function startJob(id, fn) {
     const done = fn().catch((e) => {
-      logError(`[studio] job error: ${String(e?.message || e).slice(0, 200)}`);
+      logError(`[studio] job error: ${errText(e, 200)}`);
     }).finally(() => { jobs.delete(id); });
     return done;
   }
@@ -482,7 +490,7 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       } else {
         // 上傳就失敗的：雲端沒開始辨識、AI 也沒跑，講清楚沒有花到額度（#121）
         const free = e?.notCharged || e?.cause?.notCharged;
-        Object.assign(p, { status: "failed", error: `${String(e?.message || e).slice(0, 260)}${free ? "。還沒開始辨識，沒有花到 Soniox 或 AI 的額度，網路穩了按「重試」" : ""}`, report: e?.report || p.report || null });
+        Object.assign(p, { status: "failed", error: `${errText(e, 260)}${free ? "。還沒開始辨識，沒有花到 Soniox 或 AI 的額度，網路穩了按「重試」" : ""}`, report: e?.report || p.report || null });
         // log 多記是哪一步、連線錯誤代碼，下次查得到
         logError(`[studio] processing failed at ${job.step || "?"}: ${p.error}${e?.code || e?.cause?.code ? ` (${e.code || e.cause.code})` : ""}`);
       }
@@ -503,7 +511,7 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       got = await loadCraig(p.tracks.zip, p.video, fs.mkdtempSync(path.join(work, "craig-")), { envelope: d.envelopeOf, signal });
     } catch (e) {
       if (signal.aborted) throw e;
-      p.tracks = { ...p.tracks, error: String(e?.message || e).slice(0, 200) };
+      p.tracks = { ...p.tracks, error: errText(e, 200) };
       return null;
     }
     const { craig, videoEnv, trackEnvs, align } = got;
@@ -577,7 +585,7 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
     } catch (e) {
       result = ac.signal.aborted
         ? { status: "cancelled", done: job.written.size, total: todo.length, started }
-        : { status: "failed", error: String(e?.message || e).slice(0, 300), done: job.written.size, total: todo.length, started };
+        : { status: "failed", error: errText(e, 300), done: job.written.size, total: todo.length, started };
       if (!ac.signal.aborted) logError(`[studio] translation failed: ${result.error}`);
     } finally {
       jobs.delete(id);
@@ -688,7 +696,7 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
             logError(`[studio] AI cut suggestions: ${failed.length}/${r.chunks} chunks unreadable`);
           }
         } catch (e) {
-          aiError = String(e?.message || e).slice(0, 200);
+          aiError = errText(e, 200);
           logError(`[studio] AI cut suggestions failed: ${aiError}`);
         }
       }
@@ -699,7 +707,7 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       result = { status: "done", created: new Date().toISOString(), ai, usage, error: aiError, ...(aiWarning ? { warning: aiWarning } : {}), dropped: merged.dropped,
         items: merged.suggestions.map((x, i) => ({ id: `${run}-${i + 1}`, start: x.start, end: x.end, kind: x.kind, reason: x.reason, ...(x.text ? { text: x.text.slice(0, 200) } : {}) })) };
     } catch (e) {
-      result = ac.signal.aborted ? null : { status: "failed", error: String(e?.message || e).slice(0, 300), items: [] };
+      result = ac.signal.aborted ? null : { status: "failed", error: errText(e, 300), items: [] };
       if (result) logError(`[studio] cut suggestions failed: ${result.error}`);
     } finally {
       jobs.delete(id);
@@ -759,7 +767,7 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       done = await exportVideo(dir, p, { size, subtitles, signal: ac.signal, onProgress: (x) => { job.progress = x; } });
       p.burn = { status: "done", size, subtitles, ...(done[1].style ? { style: done[1].style } : {}), ...(done[1].lang_mode ? { lang_mode: done[1].lang_mode } : {}), output: done[1].file, rev: p.rev, finished: done[1].finished, seconds: Math.round((Date.now() - job.started) / 1000) };
     } catch (e) {
-      p.burn = { status: ac.signal.aborted ? "cancelled" : "failed", size, subtitles, error: ac.signal.aborted ? "" : String(e?.message || e).slice(0, 300) };
+      p.burn = { status: ac.signal.aborted ? "cancelled" : "failed", size, subtitles, error: ac.signal.aborted ? "" : errText(e, 300) };
       if (!ac.signal.aborted) logError(`[studio] burn failed: ${p.burn.error}`);
     } finally {
       jobs.delete(id);
@@ -805,7 +813,7 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       fs.renameSync(partial, path.join(dir, file));
       result = { output: { file, key: shortKey(item, p), finished: new Date().toISOString() }, export: { status: "done", seconds: Math.round((Date.now() - job.started) / 1000) } };
     } catch (e) {
-      result = { export: { status: ac.signal.aborted ? "cancelled" : "failed", error: ac.signal.aborted ? "" : String(e?.message || e).slice(0, 300) } };
+      result = { export: { status: ac.signal.aborted ? "cancelled" : "failed", error: ac.signal.aborted ? "" : errText(e, 300) } };
       if (!ac.signal.aborted) logError(`[studio] short export failed: ${result.export.error}`);
     } finally {
       fs.rmSync(work, { recursive: true, force: true });
@@ -859,8 +867,8 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
         return send(res, 200, { shorts: shortsView(dir, latest), added: fresh.length });
       } catch (e) {
         if (ac.signal.aborted) return fail(res, 409, "已經停止，片段清單沒有變");
-        logError(`[studio] shorts suggestion failed: ${String(e?.message || e).slice(0, 200)}`);
-        return fail(res, 502, `AI 沒挑成功：${String(e?.message || e).slice(0, 200)}`);
+        logError(`[studio] shorts suggestion failed: ${errText(e, 200)}`);
+        return fail(res, 502, `AI 沒挑成功：${errText(e, 200)}`);
       } finally {
         jobs.delete(id);
         job.finish();
@@ -947,8 +955,8 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       saveSettings(s, env);
       return page("連結好了", `已連結 YouTube 頻道「${ch.title}」。可以關掉這個分頁，回到字幕工作室。`, true);
     } catch (e) {
-      logError(`[studio] YouTube connect failed: ${String(e?.message || e).slice(0, 200)}`);
-      return page("沒有連結成功", String(e?.message || e).slice(0, 300), false);
+      logError(`[studio] YouTube connect failed: ${errText(e, 200)}`);
+      return page("沒有連結成功", errText(e, 300), false);
     }
   }
 
@@ -1013,7 +1021,7 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       Object.assign(record, { status: "done", finished: new Date().toISOString(), seconds: Math.round((Date.now() - job.started) / 1000) });
     } catch (e) {
       const cancelled = ac.signal.aborted;
-      Object.assign(record, { status: cancelled ? "cancelled" : "failed", error: cancelled ? "" : String(e?.message || e).slice(0, 300), finished: new Date().toISOString() });
+      Object.assign(record, { status: cancelled ? "cancelled" : "failed", error: cancelled ? "" : errText(e, 300), finished: new Date().toISOString() });
       if (!cancelled) logError(`[studio] YouTube upload failed: ${record.error}`);
     } finally {
       jobs.delete(id);
@@ -1291,16 +1299,24 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       const base = scribeDir(env);
       const file = base ? path.join(base, "web", "shared", p.slice("/shared/".length)) : "";
       if (!file || !fs.existsSync(file)) return fail(res, 404, "找不到會議轉錄 App 的共用元件");
-      return send(res, 200, fs.readFileSync(file), SHARED_ASSETS.get(p));
+      const bytes = fs.readFileSync(file);
+      // 公開版出貨時釘了這些檔的 SHA-256（lib/shared-pin.mjs）：被改過或版本對不上就不送出去，頁面退回純文字
+      let pin;
+      try { pin = d.sharedPin(); } catch (e) { return fail(res, 500, errText(e, 200)); }
+      const bad = pin ? verifyShared(pin, p.slice("/shared/".length), bytes) : null;
+      if (bad) return fail(res, 409, `共用元件和這個版本釘的不一致，不供應：${bad}。meeting-scribe 和 recording-transcriber 要更新到同一個版本。`);
+      return send(res, 200, bytes, SHARED_ASSETS.get(p));
     }
 
     // 共用元件的版本比對（#116）：這台 meeting-scribe checkout 的網頁版本和主機（meeting_scribe_url）的一不一樣
     if (req.method === "GET" && p === "/api/shared-version") {
       try {
         const v = await d.sharedBuilds();
-        return send(res, 200, { ...v, same: Boolean(v.local && v.remote && v.local === v.remote) });
+        let pinned = false;
+        try { pinned = Boolean(d.sharedPin()); } catch { pinned = true; }
+        return send(res, 200, { ...v, same: Boolean(v.local && v.remote && v.local === v.remote), pinned });
       } catch (e) {
-        return fail(res, 502, String(e?.message || e).slice(0, 200));
+        return fail(res, 502, errText(e, 200));
       }
     }
     // 延伸模組清單（#88）：會議轉錄 App 有哪些模組；連不上時頁面說明原因
@@ -1308,7 +1324,7 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       try {
         return send(res, 200, { modules: await moduleList({ fresh: url.searchParams.get("fresh") === "1" }) });
       } catch (e) {
-        return fail(res, 502, String(e?.message || e).slice(0, 300));
+        return fail(res, 502, errText(e, 300));
       }
     }
     if (req.method === "GET" && p === "/api/home") {
@@ -1394,7 +1410,7 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       if (running) return send(res, 200, { import: running.key });
       const key = randomBytes(8).toString("hex");
       imports.set(key, { key, vid, status: "running", step: "info", progress: 0, title: "", started: Date.now() });
-      runImport(key, vid, want).catch((e) => logError(`[studio] import error: ${String(e?.message || e).slice(0, 200)}`));
+      runImport(key, vid, want).catch((e) => logError(`[studio] import error: ${errText(e, 200)}`));
       return send(res, 200, { import: key });
     }
     const im = /^\/api\/import\/([0-9a-f]{16})(?:\/(cancel))?$/.exec(p);
@@ -1580,8 +1596,8 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       } catch (e) {
         if (ac.signal.aborted) return fail(res, 409, "已經停止，字幕沒有掛上去");
         if (e.code === "reauth") return fail(res, 409, e.message);
-        logError(`[studio] adding CC captions failed: ${String(e?.message || e).slice(0, 200)}`);
-        return fail(res, 502, `CC 字幕沒有掛上去：${String(e?.message || e).slice(0, 200)}`);
+        logError(`[studio] adding CC captions failed: ${errText(e, 200)}`);
+        return fail(res, 502, `CC 字幕沒有掛上去：${errText(e, 200)}`);
       } finally {
         jobs.delete(id);
         job.finish();
@@ -1626,8 +1642,8 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
         return send(res, 200, { description: latest.description, youtube_suggest: latest.youtube_suggest, chapters: r.chapters.length });
       } catch (e) {
         if (ac.signal.aborted) return fail(res, 409, "已經停止，說明欄沒有變");
-        logError(`[studio] describe failed: ${String(e?.message || e).slice(0, 200)}`);
-        return fail(res, 502, `AI 沒寫成功：${String(e?.message || e).slice(0, 200)}`);
+        logError(`[studio] describe failed: ${errText(e, 200)}`);
+        return fail(res, 502, `AI 沒寫成功：${errText(e, 200)}`);
       } finally {
         jobs.delete(id);
         job.finish();
@@ -1658,8 +1674,8 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
         return send(res, 200, { recap: { ...latest.recap, stale: false }, drive: driveView(id, latest.drive) });
       } catch (e) {
         if (ac.signal.aborted) return fail(res, 409, "已經停止，會後總結沒有變");
-        logError(`[studio] recap failed: ${String(e?.message || e).slice(0, 200)}`);
-        return fail(res, 502, String(e?.message || e).slice(0, 300));
+        logError(`[studio] recap failed: ${errText(e, 200)}`);
+        return fail(res, 502, errText(e, 300));
       } finally {
         jobs.delete(id);
         job.finish();
@@ -1674,13 +1690,13 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       try {   // 清單裡找不到就再問一次：App 可能剛加了模組
         mod = (await moduleList()).find((m) => m.id === body?.module) || (await moduleList({ fresh: true })).find((m) => m.id === body?.module);
       } catch (e) {
-        return fail(res, 502, String(e?.message || e).slice(0, 300));
+        return fail(res, 502, errText(e, 300));
       }
       if (!mod) return fail(res, 400, "會議轉錄 App 沒有這個模組");
       try {
         options = resolveModuleOptions(mod, body?.options && typeof body.options === "object" ? body.options : {});
       } catch (e) {
-        return fail(res, 400, String(e?.message || e).slice(0, 300));
+        return fail(res, 400, errText(e, 300));
       }
       let rf = null;
       if (mod.output !== "mindmap") { try { rf = d.recapFiles(); } catch (e) { return fail(res, 502, e.message); } }   // 存不了檔就先不產生
@@ -1717,8 +1733,8 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
         return send(res, 200, { module: { key, ...latest.modules[key], stale: false }, drive: driveView(id, latest.drive) });
       } catch (e) {
         if (ac.signal.aborted) return fail(res, 409, "已經停止，結果沒有變");
-        logError(`[studio] module ${mod.id} failed: ${String(e?.message || e).slice(0, 200)}`);
-        return fail(res, e?.status === 503 ? 503 : 502, e?.status === 503 ? "會議轉錄 App 正在產生另一份，等一下再按一次。" : String(e?.message || e).slice(0, 300));
+        logError(`[studio] module ${mod.id} failed: ${errText(e, 200)}`);
+        return fail(res, e?.status === 503 ? 503 : 502, e?.status === 503 ? "會議轉錄 App 正在產生另一份，等一下再按一次。" : errText(e, 300));
       } finally {
         jobs.delete(id);
         job.finish();
@@ -1747,8 +1763,8 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       } catch (e) {
         if (ac.signal.aborted) return fail(res, 409, "已經停止，字幕沒有變");
         // 只記錯誤種類；說明和字幕可能有人名，不進 log
-        logError(`[studio] name fix failed: ${String(e?.message || e).slice(0, 200)}`);
-        return fail(res, 502, `AI 沒找成功：${String(e?.message || e).slice(0, 200)}`);
+        logError(`[studio] name fix failed: ${errText(e, 200)}`);
+        return fail(res, 502, `AI 沒找成功：${errText(e, 200)}`);
       } finally {
         jobs.delete(id);
         job.finish();
@@ -1798,8 +1814,8 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
         return send(res, 200, { rev: latest.rev, counts: l.counts, unlabeled: l.unlabeled, missing });
       } catch (e) {
         if (ac.signal.aborted) return fail(res, 409, "已經停止，字幕沒有變");
-        logError(`[studio] speaker labels failed: ${String(e?.message || e).slice(0, 200)}`);
-        return fail(res, /對不起來|info\.txt|音檔/u.test(String(e?.message)) ? 409 : 502, String(e?.message || e).slice(0, 200));
+        logError(`[studio] speaker labels failed: ${errText(e, 200)}`);
+        return fail(res, /對不起來|info\.txt|音檔/u.test(String(e?.message)) ? 409 : 502, errText(e, 200));
       } finally {
         fs.rmSync(work, { recursive: true, force: true });
         jobs.delete(id);
@@ -1841,7 +1857,7 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       try {
         r = handoffFromStudio(project, { dir, icloud: d.icloudRoot() });
       } catch (e) {
-        return fail(res, 409, String(e?.message || e).slice(0, 200));
+        return fail(res, 409, errText(e, 200));
       }
       project.handoff = { name: r.name, at: new Date().toISOString() };
       save(dir, project);
@@ -1958,13 +1974,13 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
         // 從 YouTube 下載的影片（#56）：勾了就連原片一起丟垃圾桶；只動下載資料夾裡的檔
         if (body.trashVideo === true && project.source?.downloaded && fs.existsSync(project.video)
           && path.dirname(fs.realpathSync(project.video)) === realDir(d.downloadDir())) {
-          try { await d.trash(project.video); videoTrashed = true; } catch (e) { logError(`[studio] could not trash the downloaded video: ${String(e?.message || e).slice(0, 200)}`); }
+          try { await d.trash(project.video); videoTrashed = true; } catch (e) { logError(`[studio] could not trash the downloaded video: ${errText(e, 200)}`); }
         }
         // 已經上傳到 YouTube 的原始錄影（#75）：資料夾已經清了，原片丟不掉只提醒，不算整個失敗
         if (trashOriginal && fs.existsSync(sourceVideo(project))) {
           try { await d.trash(sourceVideo(project)); originalTrashed = true; } catch (e) {
             originalFailed = true;
-            logError(`[studio] could not trash the original recording: ${String(e?.message || e).slice(0, 200)}`);
+            logError(`[studio] could not trash the original recording: ${errText(e, 200)}`);
           }
         }
       } catch (e) {
@@ -2059,7 +2075,7 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
 
   const server = http.createServer((req, res) => {
     handle(req, res).catch((e) => {
-      if (!res.headersSent) fail(res, e?.status || 400, String(e?.message || e).slice(0, 300));
+      if (!res.headersSent) fail(res, e?.status || 400, errText(e, 300));
       else res.destroy();
     });
   });

@@ -14,7 +14,7 @@ import { parseArgs as cliArgs, cloudDirs, inCloudFolder, realDir } from "../scri
 import { burnStyle, parseArgs as runArgs, prepareFromCaptions, prepareSubtitles, runSubtitle } from "../scripts/subtitle-run.mjs";
 import { addCorrection, syncCorrections } from "../lib/corrections-sync.mjs";
 import http from "node:http";
-import { MAY_USE_CHINA_CLOUD_LLM, checkProofreader, PROOFREADERS } from "../lib/proofreaders.mjs";
+import { MAY_USE_CHINA_CLOUD_LLM, PRESETS, checkProofreader, codexDisableArgs, PROOFREADERS } from "../lib/proofreaders.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // Soniox 補刪清單不碰真的狀態檔（#64）
@@ -873,4 +873,50 @@ test("audio extraction runs in the background, so a stop can end ffmpeg midway (
   const audio = path.join(work, "audio.mp3");
   const size = fs.existsSync(audio) ? fs.statSync(audio).size : 0;
   assert.ok(size < 600 * 64_000 / 8 * 0.5, `ffmpeg 應該在中途被結束（寫了 ${size} bytes）`);
+});
+
+test("codex proofreading runs without shell, plugins or web search, like the meeting app (#165)", () => {
+  const known = ["shell_tool", "unified_exec", "apps", "plugins", "browser_use", "computer_use", "in_app_browser", "other_feature"];
+  const args = codexDisableArgs(() => known);
+  assert.deepEqual(args, ["shell_tool", "unified_exec", "apps", "plugins", "browser_use", "computer_use", "in_app_browser"].flatMap((n) => ["--disable", n]));
+  // 這版 codex 不認得的名稱略過（不讓整個校對掛掉），但跑指令的開關一個都不認得就拒絕：寧可不校對也不開著 shell
+  assert.deepEqual(codexDisableArgs(() => ["shell_tool", "plugins"]), ["--disable", "shell_tool", "--disable", "plugins"]);
+  assert.throws(() => codexDisableArgs(() => ["plugins", "apps"]), /shell/i);
+  // 查不到功能清單（舊版 codex、逾時、非 0）就拒絕：不能靠「名稱不對 codex 會自己報錯」這個假設，那版 codex 也可能只是略過
+  assert.throws(() => codexDisableArgs(() => null), /cannot list/i);
+});
+
+test("the codex preset isolates the run: no user config or rules, no web search, tools disabled (#165)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rt-codex-"));
+  const fake = path.join(dir, "codex");
+  fs.writeFileSync(fake, "#!/bin/sh\nif [ \"$1\" = features ]; then printf 'shell_tool stable true\\nunified_exec stable true\\nplugins stable true\\n'; exit 0; fi\nexit 0\n", { mode: 0o755 });
+  const prev = process.env.CYCLONE_CODEX_BIN;
+  process.env.CYCLONE_CODEX_BIN = fake;
+  try {
+    const { args } = PRESETS.codex("prompt", dir, path.join(dir, "out.txt"));
+    const joined = args.join(" ");
+    for (const want of ["--sandbox read-only", "--ignore-user-config", "--ignore-rules", "web_search=\"disabled\"", "mcp_servers={}", "--disable shell_tool", "--disable unified_exec", "--disable plugins"]) {
+      assert.ok(joined.includes(want), `缺 ${want}：${joined}`);
+    }
+  } finally {
+    if (prev === undefined) delete process.env.CYCLONE_CODEX_BIN; else process.env.CYCLONE_CODEX_BIN = prev;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a failed codex feature listing is not cached, so the next proofreading run tries again (#165)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rt-codex-cache-"));
+  const fake = path.join(dir, "codex");
+  const flag = path.join(dir, "ok");
+  fs.writeFileSync(fake, `#!/bin/sh\nif [ "$1" = features ]; then [ -e "${flag}" ] || exit 1; printf 'shell_tool stable true\\nplugins stable true\\n'; exit 0; fi\nexit 0\n`, { mode: 0o755 });
+  const prev = process.env.CYCLONE_CODEX_BIN;
+  process.env.CYCLONE_CODEX_BIN = fake;
+  try {
+    assert.throws(() => PRESETS.codex("p", dir, path.join(dir, "o")), /cannot list/i);
+    fs.writeFileSync(flag, "");
+    assert.ok(PRESETS.codex("p", dir, path.join(dir, "o")).args.includes("shell_tool"), "第二次要重新查，不是沿用第一次的失敗");
+  } finally {
+    if (prev === undefined) delete process.env.CYCLONE_CODEX_BIN; else process.env.CYCLONE_CODEX_BIN = prev;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

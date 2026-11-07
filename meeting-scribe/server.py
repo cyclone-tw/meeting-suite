@@ -3192,6 +3192,21 @@ class AgentHub:
         self.gate = gate
         self.sessions = {}
         self.lock = threading.Lock()
+        self.changed = threading.Condition(self.lock)   # 有新 session 進來就叫醒在等的 SSE 連線（#209）
+
+    def wait_for_session(self, meeting_id, timeout):
+        """等這場的 session 出現，最多 timeout 秒；一建立就被叫醒，不用睡滿輪詢間隔。逾時回 None。"""
+        with self.changed:
+            present = meeting_id in self.sessions
+            if not present:
+                self.changed.wait(timeout)
+        session = self.get(meeting_id)
+        if session is None and present:
+            # 登記著但 get 不給（例如剛被清掉）：還是要睡，不然呼叫端的迴圈會空轉
+            with self.changed:
+                self.changed.wait(timeout)
+            session = self.get(meeting_id)
+        return session
 
     def get(self, meeting_id, create=False):
         rejected = None
@@ -3206,8 +3221,10 @@ class AgentHub:
                         rejected, s = s, None
                     else:
                         self.sessions[meeting_id] = s
+                        self.changed.notify_all()
                 elif sum(1 for x in self.sessions.values() if not x.closed and x not in stale) < MAX_SESSIONS:
                     s = self.sessions[meeting_id] = self.factory(meeting_id)
+                    self.changed.notify_all()
         # 關程序最多等 5 秒，放在鎖外，不擋其他會議
         self._retire(stale)
         if rejected:
@@ -3249,6 +3266,7 @@ class AgentHub:
             if meeting_id not in self.sessions:
                 s = self.sessions[meeting_id] = self.factory(meeting_id)
                 s.close()
+                self.changed.notify_all()
 
     def _reap(self):
         """呼叫端持有 lock：移除關掉很久的，回傳該關掉的（由呼叫端在鎖外關）。"""
@@ -5898,7 +5916,7 @@ class Handler(BaseHTTPRequestHandler):
     def _events_stream(self, hub, meeting):
         last_id = (self.headers.get("Last-Event-ID") or "").strip()
         seq = 0
-        waited = 0.0
+        wait_until = time.monotonic() + self.sse_wait_seconds
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
@@ -5909,13 +5927,14 @@ class Handler(BaseHTTPRequestHandler):
                 session = hub.get(meeting)
                 if session is None:
                     # 還沒有第一段送來：先等，連線保持
-                    if waited >= self.sse_wait_seconds:
+                    if time.monotonic() >= wait_until:
                         return   # 等太久：關連線，不讓閒置連線永遠占著 thread（EventSource 會自己重連，#207）
-                    self.wfile.write(b": waiting\n\n")
+                    self.wfile.write(b": waiting\n\n")   # 保活，也讓斷線的用戶端被發現
                     self.wfile.flush()
-                    time.sleep(self.sse_wait_poll)
-                    waited += self.sse_wait_poll
-                    continue
+                    # 睡在 hub 的 condition 上：session 一建立就醒（#209），不然最久 sse_wait_poll 秒才醒來看一次
+                    session = hub.wait_for_session(meeting, self.sse_wait_poll)
+                    if session is None:
+                        continue
                 if attached is not session:
                     # 第一次接上：照 Last-Event-ID 續傳；代碼是別的 session（服務重啟過）就從頭補送。
                     # 連線中途 hub 換了 session 也從頭送

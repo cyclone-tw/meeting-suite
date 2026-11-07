@@ -58,6 +58,10 @@ print("Drive 根目錄：" + ("、".join(r["label"] for r in roots.values()) or 
 PYEOF
   )
 fi
+# 預設只放行安裝者自己的 tailnet 帳號（#209）：設定檔沒有 tailscale_users 才填；已有的（含空清單）不動
+# 輸出先收進變數：tailscale 沒登入也好、helper 不讀完就結束也好，都不能在 pipefail 下讓安裝中止
+TS_JSON="$("${TS}" status --self --json 2>/dev/null || true)"
+printf '%s' "${TS_JSON}" | "${PYTHON}" -I "${REPO}/deploy/ensure-tailnet-users.py" "${CONFIG}"
 
 # 有會議正在錄音就不重啟：重啟會切斷本機辨識與 AI 整理（#60）。舊版服務沒有 recording_idle_s 就不擋。
 # 放在寫 plist 之前：放棄部署時什麼都不改（#63）。
