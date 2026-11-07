@@ -53,8 +53,12 @@ export const PRESETS = {
     const cmd = bin("codex", "CYCLONE_CODEX_BIN");
     return {
       cmd,
-      args: ["exec", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules", "--sandbox", "read-only",
-        "-c", "mcp_servers={}", "-c", 'web_search="disabled"', ...codexDisableArgs(() => codexFeatures(cmd)), "-o", outFile],
+      // args 是 getter：只有真的要跑 codex 才查功能清單（會 spawn codex）。proofreaderAvailable 與 Studio 首頁只需要 cmd，
+      // 查不到（例如 Dock 版 App 的 PATH 沒有 pnpm 的 bin）不能把「有沒有裝」的問題變成例外、讓整個首頁壞掉（#167）
+      get args() {
+        return ["exec", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules", "--sandbox", "read-only",
+          "-c", "mcp_servers={}", "-c", 'web_search="disabled"', ...codexDisableArgs(() => codexFeatures(cmd)), "-o", outFile];
+      },
       input: prompt,
       readOut: true,
     };

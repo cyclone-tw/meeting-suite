@@ -3483,3 +3483,18 @@ test("without a pin (private checkouts) shared components are served as before (
   assert.equal((await s.req("GET", "/shared/md.js")).status, 200);
   assert.equal((await s.req("GET", "/api/shared-version")).json.pinned, false);
 });
+
+test("the home page still loads when codex cannot list its features, as in the Dock app's PATH (#167)", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rt-home-codex-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const fake = path.join(dir, "codex");
+  fs.writeFileSync(fake, "#!/bin/sh\nif [ \"$1\" = features ]; then exit 1; fi\nexit 0\n", { mode: 0o755 });
+  const prev = process.env.CYCLONE_CODEX_BIN;
+  process.env.CYCLONE_CODEX_BIN = fake;
+  t.after(() => { if (prev === undefined) delete process.env.CYCLONE_CODEX_BIN; else process.env.CYCLONE_CODEX_BIN = prev; });
+  const s = await startStudio(t);
+  const home = await s.req("GET", "/api/home");
+  assert.equal(home.status, 200, home.raw);
+  assert.ok(home.json.tools && "codex" in home.json.tools.proofreaders, "首頁的 tools.proofreaders 還在");
+  assert.equal(home.json.tools.proofreaders.codex, true, "指令在就算有裝（查不到功能清單要等真的跑校對才擋）");
+});

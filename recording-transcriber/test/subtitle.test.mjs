@@ -14,7 +14,7 @@ import { parseArgs as cliArgs, cloudDirs, inCloudFolder, realDir } from "../scri
 import { burnStyle, parseArgs as runArgs, prepareFromCaptions, prepareSubtitles, runSubtitle } from "../scripts/subtitle-run.mjs";
 import { addCorrection, syncCorrections } from "../lib/corrections-sync.mjs";
 import http from "node:http";
-import { MAY_USE_CHINA_CLOUD_LLM, PRESETS, checkProofreader, codexDisableArgs, PROOFREADERS } from "../lib/proofreaders.mjs";
+import { MAY_USE_CHINA_CLOUD_LLM, PRESETS, checkProofreader, codexDisableArgs, PROOFREADERS, proofreaderAvailable } from "../lib/proofreaders.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // Soniox 補刪清單不碰真的狀態檔（#64）
@@ -912,9 +912,28 @@ test("a failed codex feature listing is not cached, so the next proofreading run
   const prev = process.env.CYCLONE_CODEX_BIN;
   process.env.CYCLONE_CODEX_BIN = fake;
   try {
-    assert.throws(() => PRESETS.codex("p", dir, path.join(dir, "o")), /cannot list/i);
+    assert.throws(() => PRESETS.codex("p", dir, path.join(dir, "o")).args, /cannot list/i);
     fs.writeFileSync(flag, "");
     assert.ok(PRESETS.codex("p", dir, path.join(dir, "o")).args.includes("shell_tool"), "第二次要重新查，不是沿用第一次的失敗");
+  } finally {
+    if (prev === undefined) delete process.env.CYCLONE_CODEX_BIN; else process.env.CYCLONE_CODEX_BIN = prev;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("asking whether codex is available never lists its features, and a failing listing does not break that question (#167)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rt-codex-avail-"));
+  const fake = path.join(dir, "codex");
+  fs.writeFileSync(fake, "#!/bin/sh\nif [ \"$1\" = features ]; then exit 1; fi\nexit 0\n", { mode: 0o755 });   // features list 一定失敗（像 Dock 版 App 的 PATH 下）
+  const prev = process.env.CYCLONE_CODEX_BIN;
+  process.env.CYCLONE_CODEX_BIN = fake;
+  try {
+    assert.equal(proofreaderAvailable("codex"), true, "指令在、只是查不到功能清單：照樣算有裝，首頁才不會壞");
+    const preset = PRESETS.codex("p", dir, path.join(dir, "o"));
+    assert.equal(preset.cmd, fake, "只要指令名稱不用查功能清單");
+    assert.throws(() => preset.args, /cannot list/i, "真的要跑 codex 校對時才查，查不到就拒絕");
+    // 首頁問所有校對者有沒有裝：任何一個都不能丟例外
+    for (const name of PROOFREADERS) assert.doesNotThrow(() => proofreaderAvailable(name), name);
   } finally {
     if (prev === undefined) delete process.env.CYCLONE_CODEX_BIN; else process.env.CYCLONE_CODEX_BIN = prev;
     fs.rmSync(dir, { recursive: true, force: true });
