@@ -2,9 +2,13 @@
 
 版本規則：別人升級後要動手才能繼續用（設定、存檔格式、拿掉功能、最低版本）升大版號；新功能升小版號；修正與文件升修補號。0.x 期間大版號降為小版號。
 
-## v0.6.1（2026-11-07）
+## v0.6.2（2026-11-07）
 
 ### 修正
+
+- servers do not reverse-resolve the bind address
+
+## v0.6.1（2026-11-07）
 
 - Studio home no longer breaks when codex features cannot be listed
 

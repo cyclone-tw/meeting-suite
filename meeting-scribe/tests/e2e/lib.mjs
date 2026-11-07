@@ -75,7 +75,7 @@ export function buildPages(api, out) {
 }
 
 export async function startStatic(port, dir) {
-  const proc = spawn(PY, ["-I", "-m", "http.server", String(port), "--bind", "127.0.0.1", "--directory", dir], { stdio: "ignore" });
+  const proc = spawn(PY, ["-I", path.join(ROOT, "tests/e2e/static_server.py"), String(port), dir], { stdio: "ignore" });   // 不用 -m http.server：它綁埠會做反向 DNS（#211）
   for (let i = 0; i < 50 && proc.exitCode === null; i++) {
     try { if ((await fetch(`http://127.0.0.1:${port}/build.txt`, { signal: AbortSignal.timeout(1000) })).ok) return proc; } catch (e) { /* 還沒起來 */ }
     await sleep(200);

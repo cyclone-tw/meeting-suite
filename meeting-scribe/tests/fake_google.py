@@ -23,7 +23,9 @@ import json
 import re
 import socket
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
+
+from nodns import NoDnsServer
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 CLIENT_ID = "123456789012-e2etestclientabcdefghijklmnop.apps.googleusercontent.com"
@@ -407,7 +409,7 @@ class FakeGoogle:
                     return
                 self._send(200, {"ok": True})
 
-        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.httpd = NoDnsServer(("127.0.0.1", 0), H)
         self.url = f"http://127.0.0.1:{self.httpd.server_address[1]}"
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         return self

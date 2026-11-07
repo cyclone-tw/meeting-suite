@@ -22,6 +22,7 @@ import queue
 import re
 import secrets
 import shutil
+import socketserver
 import subprocess
 import sys
 import tempfile
@@ -6149,6 +6150,13 @@ class Handler(BaseHTTPRequestHandler):
 
 class QuietServer(ThreadingHTTPServer):
     """未預期的例外只記類型，不印 traceback（traceback 會帶出 Drive 路徑與會議名稱）。"""
+
+    def server_bind(self):
+        # 標準函式庫的 HTTPServer.server_bind 會對綁的位址做 socket.getfqdn（反向名稱查詢）：DNS 狀況怪的主機上
+        # 每次啟動可能卡幾十秒（GitHub 的 macOS 機器實測約 35 秒，#211）。我們只綁 127.0.0.1，用不到網域名稱
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name, self.server_port = host, port
 
     def handle_error(self, request, client_address):
         sys.stderr.write(f"error {type(sys.exc_info()[1]).__name__}\n")

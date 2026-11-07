@@ -2,7 +2,9 @@
 import json
 import re
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
+
+from nodns import NoDnsServer
 
 KEY = "test-soniox-key"
 TOKENS = [
@@ -58,7 +60,7 @@ class FakeSoniox:
             def do_DELETE(self):
                 self._handle("DELETE")
 
-        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.httpd = NoDnsServer(("127.0.0.1", 0), H)
         self.url = f"http://127.0.0.1:{self.httpd.server_address[1]}"
 
     def start(self):

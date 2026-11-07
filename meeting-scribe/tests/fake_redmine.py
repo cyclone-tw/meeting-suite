@@ -2,7 +2,9 @@
 import json
 import re
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
+
+from nodns import NoDnsServer
 from urllib.parse import parse_qs, urlsplit
 
 KEY = "test-redmine-key-0123456789"
@@ -49,7 +51,7 @@ class FakeRedmine:
             def do_PUT(self):
                 self._handle("PUT")
 
-        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.httpd = NoDnsServer(("127.0.0.1", 0), H)
         self.url = f"http://127.0.0.1:{self.httpd.server_address[1]}"
 
     def start(self):
