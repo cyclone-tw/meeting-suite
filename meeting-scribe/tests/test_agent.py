@@ -681,6 +681,44 @@ class HttpTest(unittest.TestCase):
             self.assertEqual(self.post("/api/agent/module", good)[0], 502, "AI 沒給內容")
         self.assertEqual(self.hub.sessions, {}, "延伸模組不佔會議名額")
 
+    def test_ask_endpoint(self):
+        # 問 AI（#214）：照逐字稿回答、照抄段落時間當出處；前文只帶最近幾輪；不佔會議名額、不搶總結名額
+        paras = [{"start": 61000, "text": "書上的學生下周再談"}, {"start": 125000, "text": "第二段"}]
+        good = {"meeting": MID, "paras": paras, "question": "什麼時候再談？"}
+        self.assertEqual(self.post("/api/agent/ask", good, header=False)[0], 403)
+        for bad in ({**good, "paras": []}, {**good, "paras": [{"start": "x", "text": "a"}]}, {**good, "question": "  "},
+                    {**good, "question": "問" * (server.ASK_MAX_QUESTION + 1)}, {**good, "question": 3}):
+            self.assertEqual(self.post("/api/agent/ask", bad)[0], 400, bad)
+        with mock.patch.object(server.Handler, "agent_ready", staticmethod(lambda: False)):
+            self.assertEqual(self.post("/api/agent/ask", good)[0], 503)
+        self.assertTrue(server.SUMMARY_SLOT.acquire(blocking=False))
+        try:
+            status, ev = self.post("/api/agent/ask", good)   # 總結正在跑也能問
+        finally:
+            server.SUMMARY_SLOT.release()
+        self.assertEqual(status, 200, ev)
+        self.assertEqual(ev["answer"], "會議裡提到書上的學生下週再談 [00:01:01]。\n\n問題：什麼時候再談？", "拿掉 ```、固定替換、出處照抄段落時間")
+        self.assertIn("usage", ev)
+        status, ev = self.post("/api/agent/ask", {**good, "history": [{"q": "前一題", "a": "前一個回答"}, {"q": 1, "a": "壞的"}]})
+        self.assertTrue(ev["answer"].endswith("（有前文）"), ev)
+        with mock.patch.dict(os.environ, {"FAKE_MODE": "badask"}):
+            self.assertEqual(self.post("/api/agent/ask", good)[0], 502, "AI 沒回答")
+        self.assertEqual(self.hub.sessions, {}, "問 AI 不佔會議名額")
+        # 同一場一次一題；全台最多 ASK_LIMIT 題
+        with server.ASK_LOCK:
+            server.ASKING.add(MID)
+        try:
+            self.assertEqual(self.post("/api/agent/ask", good)[0], 409)
+            with server.ASK_LOCK:
+                server.ASKING.update({"d" * 32})
+            self.assertEqual(len(server.ASKING), server.ASK_LIMIT)
+            self.assertEqual(self.post("/api/agent/ask", {**good, "meeting": "e" * 32})[0], 503)
+        finally:
+            with server.ASK_LOCK:
+                server.ASKING.clear()
+        self.assertEqual(self.post("/api/agent/ask", good)[0], 200, "答完就放開")
+        self.assertEqual(server.ASKING, set())
+
     def test_mindmap_module(self):
         # 心智圖模組（#150）：JSON 和 App 的一樣整理過，另附 Mermaid、.opml、Markdown 三種文字
         status, ev = self.post("/api/agent/module", {"meeting": MID, "module": "mindmap", "paras": [{"start": 1000, "text": "閱讀進度"}],
@@ -713,6 +751,45 @@ class HttpTest(unittest.TestCase):
     def test_healthz_reports_agent(self):
         with urllib.request.urlopen(self.base + "/healthz", timeout=5) as r:
             self.assertTrue(json.loads(r.read())["agent"])
+
+
+
+class AskTextTest(unittest.TestCase):
+    """問 AI（#214）送給 AI 的逐字稿與前文。"""
+
+    def test_short_transcript_is_sent_whole(self):
+        self.assertEqual(server.ask_text([(0, "開場"), (61000, "第二段")]), "[00:00:00] 開場\n[00:01:01] 第二段")
+
+    def test_long_transcript_keeps_head_and_tail_and_says_what_is_missing(self):
+        paras = [(i * 60000, f"第{i}段" + "字" * 90) for i in range(100)]
+        t = server.ask_text(paras, limit=2000)
+        self.assertLessEqual(len(t), 2100)
+        self.assertTrue(t.startswith("[00:00:00] 第0段"))
+        self.assertIn("[01:39:00] 第99段", t, "最後一段留著")
+        self.assertRegex(t, r"…（逐字稿太長，中間 \d+ 段沒有附上：\d\d:\d\d:\d\d 到 \d\d:\d\d:\d\d）…")
+
+    def test_one_huge_paragraph_is_cut_not_dropped(self):
+        # 第一段、最後一段本身就超過一半（例如沒有標點的匯入檔）：截短留著，不是整段丟掉只剩省略說明（#217）
+        t = server.ask_text([(0, "頭" * 5000), (60000, "中"), (120000, "尾" * 5000)], limit=2000)
+        self.assertTrue(t.startswith("[00:00:00] 頭頭"), t[:30])
+        self.assertIn("[00:02:00] 尾尾", t)
+        self.assertIn("中間 1 段沒有附上：00:01:00 到 00:01:00", t)
+        self.assertLessEqual(len(t), 2100)
+        only = server.ask_text([(0, "字" * 5000)], limit=2000)
+        self.assertTrue(only.startswith("[00:00:00] 字") and len(only) < 1100, "只有一段也截短留著")
+
+    def test_parse_ask_trims_question_and_keeps_recent_history(self):
+        hist = [{"q": f"q{i}", "a": "答" * 3000} for i in range(5)]
+        paras, q, h = server.parse_ask({"paras": [{"start": 0, "text": " x "}, {"start": 5, "text": "  "}], "question": " 問 ", "history": hist})
+        self.assertEqual((paras, q), ([(0, "x")], "問"), "空白段略過")
+        self.assertEqual([x[0] for x in h], ["q2", "q3", "q4"])
+        self.assertEqual(len(h[0][1]), server.ASK_HISTORY_CHARS)
+
+    def test_answer_cleanup(self):
+        self.assertEqual(server.clean_ask_answer("```md\n## 重點\n- a\n```"), "## 重點\n- a")
+        self.assertEqual(len(server.clean_ask_answer("字" * (server.ASK_MAX_ANSWER + 10))), server.ASK_MAX_ANSWER)
+        with self.assertRaises(ValueError):
+            server.clean_ask_answer("  ")
 
 
 if __name__ == "__main__":

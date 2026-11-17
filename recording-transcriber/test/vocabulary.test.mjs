@@ -2,6 +2,9 @@
 // replacement guards, ZeroType import filtering, the optional private Wiki
 // vocabulary and the MacBook-only import command. All names and paths are
 // synthetic; nothing here reads the real ZeroType table or the real Wiki.
+// The two vocabulary notes come from a wiki tool (#197); here that is
+// test/helpers/fake-wiki.mjs, which serves files under FAKE_WIKI_ROOT. Reading
+// through the wiki, its cache and the harvest write-back are in vocabulary-wiki.test.mjs.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -13,7 +16,6 @@ import {
   applyVocabulary,
   classifyZeroTypeCandidates,
   countVocabularyHits,
-  loadPrivateVocabulary,
   loadSharedVocabulary,
   parsePrivateVocabulary,
   parseSharedVocabulary,
@@ -23,18 +25,23 @@ import {
   zeroTypeToPairs,
 } from "../lib/vocabulary.mjs";
 import { useTestProfile } from "./helpers/user-profile.mjs";
+import { useFakeWiki, writeNote } from "./helpers/fake-wiki.mjs";
 
 const TOOL_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const IMPORT = path.join(TOOL_ROOT, "scripts", "vocab-import-zerotype.mjs");
 const SHIPPED = JSON.parse(fs.readFileSync(path.join(TOOL_ROOT, "config", "asr-profile.json"), "utf8"));
 const EXAMPLE = JSON.parse(fs.readFileSync(path.join(TOOL_ROOT, "config", "asr-profile.example.json"), "utf8"));
-// 測試用的使用者設定：詞彙筆記放在暫存 home 底下的這兩個位置，固定替換只有一筆
+// 測試用的使用者設定：兩篇詞彙筆記在假 wiki 的這兩個位置（假 wiki 的根目錄就是各測試的暫存 home）
 const PROFILE = {
   vocabulary: { "夜圈": "頁籤", "開衣修": "開 issue" },
-  shared_vocabulary: { paths: ["notes/transcription-vocabulary.md"] },
-  private_vocabulary: { paths: ["notes/asr-private.md"] },
+  wiki_cli: "fake-wiki",
+  shared_vocabulary: { wiki_path: "notes/transcription-vocabulary.md" },
+  private_vocabulary: { wiki_path: "notes/asr-private.md" },
 };
 useTestProfile(PROFILE);
+const WIKI = useFakeWiki();
+// 子程序的環境：暫存 home 同時是假 wiki 的根目錄
+const homeEnv = (home) => ({ ...process.env, CYCLONE_ASR_OWNER_HOME: home, FAKE_WIKI_ROOT: home });
 
 function makeTemp() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "vocab-test-"));
@@ -166,36 +173,9 @@ test("classification: corpus hits send a candidate to review", () => {
 
 // ---- private Wiki vocabulary ---------------------------------------------------
 
-test("private vocabulary: a missing file is silently empty", () => {
-  const home = makeTemp();
-  const loaded = loadPrivateVocabulary({ home, paths: ["notes/wiki/Private/x.md"] });
-  assert.deepEqual(loaded.vocabulary, {});
-  assert.equal(loaded.sha256, "absent");
-});
-
-test("private vocabulary: the first existing path wins and its JSON block is read", () => {
-  const home = makeTemp();
-  const replica = "notes/wiki-search/current/Private/v.md";
-  const editor = "notes/wiki/Private/v.md";
-  fs.mkdirSync(path.join(home, path.dirname(editor)), { recursive: true });
-  fs.writeFileSync(path.join(home, editor), privateNote({ vocabulary: { "Adah": "Old" } }));
-  let loaded = loadPrivateVocabulary({ home, paths: [replica, editor] });
-  assert.deepEqual(loaded.vocabulary, { "Adah": "Old" });
-  fs.mkdirSync(path.join(home, path.dirname(replica)), { recursive: true });
-  fs.writeFileSync(path.join(home, replica), privateNote({ vocabulary: { "Adah": "Ada" }, skip: ["埃達"] }));
-  loaded = loadPrivateVocabulary({ home, paths: [replica, editor] });
-  assert.deepEqual(loaded.vocabulary, { "Adah": "Ada" });
-  assert.deepEqual(loaded.skip, ["埃達"]);
-  assert.match(loaded.sha256, /^[0-9a-f]{64}$/);
-});
-
-test("private vocabulary: malformed JSON or unsafe paths are ignored", () => {
+test("private vocabulary: a note without a readable JSON block is not a vocabulary", () => {
   assert.equal(parsePrivateVocabulary("# no block").vocabulary, undefined);
   assert.equal(parsePrivateVocabulary("```json\n{oops\n```").vocabulary, undefined);
-  const home = makeTemp();
-  fs.writeFileSync(path.join(home, "outside.md"), privateNote({ vocabulary: { "a": "b" } }));
-  const loaded = loadPrivateVocabulary({ home: path.join(home, "sub"), paths: ["../outside.md", path.join(home, "outside.md")] });
-  assert.deepEqual(loaded.vocabulary, {});
 });
 
 test("private vocabulary: keys are trimmed and blank keys are dropped", () => {
@@ -217,11 +197,10 @@ test("a vocabulary that cannot compile warns once and is treated as empty", (t) 
 });
 
 test("postprocess survives blank, lone-surrogate and oversized private keys", () => {
-  const rel = PROFILE.private_vocabulary.paths[0];
-  const writeNote = (vocabulary) => {
+  const rel = PROFILE.private_vocabulary.wiki_path;
+  const homeWith = (vocabulary) => {
     const home = makeTemp();
-    fs.mkdirSync(path.join(home, path.dirname(rel)), { recursive: true });
-    fs.writeFileSync(path.join(home, rel), privateNote({ vocabulary }));
+    writeNote(home, rel, privateNote({ vocabulary }));
     return home;
   };
   const script = `
@@ -229,14 +208,14 @@ test("postprocess survives blank, lone-surrogate and oversized private keys", ()
     console.log(await m.postprocessText(process.argv[2], {}, { language: "en" }));`;
   const run = (home) => spawnSync("node", ["--input-type=module", "-e", script,
     path.join(TOOL_ROOT, "scripts", "postprocess-text.mjs"), "Adah 夜圈 \u{1F600} a b"], {
-    encoding: "utf8", env: { ...process.env, CYCLONE_ASR_OWNER_HOME: home },
+    encoding: "utf8", env: homeEnv(home),
   });
   // "\ud83d" is the first half of a pasted emoji; in a /u regex it never
   // splits a real surrogate pair.
-  let r = run(writeNote({ "  ": "_", " Adah ": "Ada", "\ud83d": "X" }));
+  let r = run(homeWith({ "  ": "_", " Adah ": "Ada", "\ud83d": "X" }));
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout.trim(), "Ada 頁籤 \u{1F600} a b");
-  r = run(writeNote({ ["z".repeat(100_000)]: "y", "Adah": "Ada" }));
+  r = run(homeWith({ ["z".repeat(100_000)]: "y", "Adah": "Ada" }));
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout.trim(), "Adah 夜圈 \u{1F600} a b", "an uncompilable vocabulary is skipped, not fatal");
   assert.match(r.stderr, /\[vocabulary\]/);
@@ -245,23 +224,21 @@ test("postprocess survives blank, lone-surrogate and oversized private keys", ()
 
 test("postprocess applies profile, then private, then manifest vocabulary", () => {
   const home = makeTemp();
-  const rel = PROFILE.private_vocabulary.paths[0];
-  fs.mkdirSync(path.join(home, path.dirname(rel)), { recursive: true });
-  fs.writeFileSync(path.join(home, rel), privateNote({ vocabulary: { "Adah": "Ada", "夜圈": "private-wins" } }));
+  writeNote(home, PROFILE.private_vocabulary.wiki_path, privateNote({ vocabulary: { "Adah": "Ada", "夜圈": "private-wins" } }));
   const script = `
     const m = await import(process.argv[1]);
     const out = await m.postprocessText(process.argv[2], { vocabulary: { "Zed": "Zee" } }, { language: "en" });
     console.log(out);`;
-  const run = (env) => spawnSync("node", ["--input-type=module", "-e", script,
+  const run = (h) => spawnSync("node", ["--input-type=module", "-e", script,
     path.join(TOOL_ROOT, "scripts", "postprocess-text.mjs"), "Adah 夜圈 Zed 開衣修"], {
-    encoding: "utf8", env: { ...process.env, ...env },
+    encoding: "utf8", env: homeEnv(h),
   });
-  let r = run({ CYCLONE_ASR_OWNER_HOME: home });
+  let r = run(home);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout.trim(), "Ada private-wins Zee 開 issue");
-  r = run({ CYCLONE_ASR_OWNER_HOME: makeTemp() });
+  r = run(makeTemp());
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout.trim(), "Adah 頁籤 Zee 開 issue", "without the private file only shared rules apply");
+  assert.equal(r.stdout.trim(), "Adah 頁籤 Zee 開 issue", "without the private note only shared rules apply");
 });
 
 // ---- shared Wiki vocabulary (#84) ------------------------------------------------
@@ -322,58 +299,29 @@ test("shared vocabulary: four sections by their first words, notes only on hints
   assert.match(parseSharedVocabulary(SHARED_NOTE.replace("## 固定替換", "### 固定替換")).error, /固定替換/);
 });
 
-test("shared vocabulary: the first existing path wins; a broken note warns and is ignored", () => {
+test("shared vocabulary: unusable lines are counted once, without echoing them", () => {
   const home = makeTemp();
-  const [replica, editor] = ["replica/v.md", "editor/v.md"];
-  assert.equal(loadSharedVocabulary({ home, paths: [replica, editor] }).sha256, "absent");
-  fs.mkdirSync(path.join(home, "editor"), { recursive: true });
-  fs.writeFileSync(path.join(home, editor), SHARED_NOTE);
+  const note = PROFILE.shared_vocabulary.wiki_path;
+  writeNote(home, note, SHARED_NOTE);
   const warnings = [];
-  const warn = (m) => warnings.push(m);
-  assert.deepEqual(loadSharedVocabulary({ home, paths: [replica, editor], warn }).fixed, { Adah: "Ada", "夜圈": "頁籤" });
+  const loaded = loadSharedVocabulary({ source: { note, bin: WIKI }, cacheDir: path.join(home, "cache"), env: homeEnv(home), warn: (m) => warnings.push(m) });
+  assert.deepEqual(loaded.fixed, { Adah: "Ada", "夜圈": "頁籤" });
+  assert.equal(loaded.path, note);
+  assert.match(loaded.sha256, /^[0-9a-f]{64}$/);
   assert.equal(warnings.length, 1, "unusable lines are counted once");
-  assert.ok(!warnings[0].includes("周"), "the warning must not echo entries");
-  fs.mkdirSync(path.join(home, "replica"), { recursive: true });
-  fs.writeFileSync(path.join(home, replica), "no sections here");
-  const fellBack = loadSharedVocabulary({ home, paths: [replica, editor], warn });
-  assert.equal(fellBack.path, path.join(home, editor), "壞的搜尋副本不擋住好的 checkout");
-  assert.deepEqual(fellBack.fixed, { Adah: "Ada", "夜圈": "頁籤" });
-  fs.writeFileSync(path.join(home, editor), "still no sections");
-  const broken = loadSharedVocabulary({ home, paths: [replica, editor], warn });
-  assert.equal(broken.sha256, "invalid");
-  assert.equal(broken.path, "");
-  assert.deepEqual(broken.fixed, {});
-});
-
-test("shared vocabulary is read again when the note changes, so a running Studio picks up edits", async () => {
-  const home = makeTemp();
-  const rel = PROFILE.shared_vocabulary.paths[0];
-  fs.mkdirSync(path.join(home, path.dirname(rel)), { recursive: true });
-  fs.writeFileSync(path.join(home, rel), SHARED_NOTE);
-  const saved = process.env.CYCLONE_ASR_OWNER_HOME;
-  process.env.CYCLONE_ASR_OWNER_HOME = home;
-  try {
-    const { sharedVocabulary } = await import("../lib/asr-profile.mjs");
-    assert.equal(sharedVocabulary().fixed.Adah, "Ada");
-    assert.equal(sharedVocabulary(), sharedVocabulary(), "沒改就用同一份");
-    fs.writeFileSync(path.join(home, rel), SHARED_NOTE.replace("- Adah → Ada", "- Adah → Ada Lovelace"));
-    assert.equal(sharedVocabulary().fixed.Adah, "Ada Lovelace");
-  } finally {
-    if (saved === undefined) delete process.env.CYCLONE_ASR_OWNER_HOME; else process.env.CYCLONE_ASR_OWNER_HOME = saved;
-  }
+  assert.match(warnings[0], /skipped 2 unusable line/);
+  assert.ok(!warnings[0].includes("周") && !warnings[0].includes("Typo"), "the warning must not echo entries");
 });
 
 test("postprocess uses the shared note's 固定替換 instead of the profile list when the note exists", () => {
   const home = makeTemp();
-  const rel = PROFILE.shared_vocabulary.paths[0];
-  fs.mkdirSync(path.join(home, path.dirname(rel)), { recursive: true });
-  fs.writeFileSync(path.join(home, rel), SHARED_NOTE);
+  writeNote(home, PROFILE.shared_vocabulary.wiki_path, SHARED_NOTE);
   const script = `
     const m = await import(process.argv[1]);
     console.log(await m.postprocessText(process.argv[2], {}, { language: "en" }));`;
   const run = (h) => spawnSync("node", ["--input-type=module", "-e", script,
     path.join(TOOL_ROOT, "scripts", "postprocess-text.mjs"), "Adah 夜圈 開衣修 Open App 書上"], {
-    encoding: "utf8", env: { ...process.env, CYCLONE_ASR_OWNER_HOME: h },
+    encoding: "utf8", env: homeEnv(h),
   });
   let r = run(home);
   assert.equal(r.status, 0, r.stderr);
@@ -410,17 +358,16 @@ test("ZeroType table: fixed and dictation become literals, prefixes get a traili
 
 test("export-zerotype backs up and writes only when asked, and refuses without the shared note", () => {
   const home = makeTemp();
-  const rel = PROFILE.shared_vocabulary.paths[0];
+  const rel = PROFILE.shared_vocabulary.wiki_path;
   const zt = path.join(home, "zt.json");
   fs.writeFileSync(zt, JSON.stringify({ FinalOutput: { Literals: {}, Regex: [] }, Transcription: { Literals: { Ada: ["Adah"] }, Regex: [] } }));
   const run = (...args) => spawnSync("node", [path.join(TOOL_ROOT, "scripts", "vocab-export-zerotype.mjs"), "--zerotype", zt, ...args], {
-    encoding: "utf8", env: { ...process.env, CYCLONE_ASR_OWNER_HOME: home },
+    encoding: "utf8", env: homeEnv(home),
   });
   let r = run("--check");
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /shared vocabulary note was not found/);
-  fs.mkdirSync(path.join(home, path.dirname(rel)), { recursive: true });
-  fs.writeFileSync(path.join(home, rel), SHARED_NOTE);
+  assert.match(r.stderr, /shared vocabulary note could not be read from the wiki/);
+  writeNote(home, rel, SHARED_NOTE);
   r = run("--check", "--list");
   assert.equal(r.status, 1, "有要改的：--check 回 1");
   assert.match(r.stdout, /add 2, remove 0, change 0/);
@@ -477,55 +424,6 @@ test("harvest appends to the end of each section and refuses a note without the 
   assert.match(out, /- 夜圈 → 頁籤\n- 周 → 週\n- 同一個 → 同一個\n- Bad → Good（有備註）\n- Typo -> Fixed\n- Zeeb → Zeabur\n\n## 口述替換/, "接在段落最後、空行之前");
   assert.equal(appendToSharedNote(SHARED_NOTE, {}), SHARED_NOTE, "沒有要加的就不動");
   assert.throws(() => appendToSharedNote("# 空的\n", { hints: [["a", "b"]] }), /找不到「誤聽對照」段/);
-});
-
-test("harvest writes through a temporary wiki worktree: lint, commit, push, and always cleans up", async () => {
-  const root = makeTemp();
-  const git = (cwd, ...a) => { const r = spawnSync("git", a, { cwd, encoding: "utf8" }); assert.equal(r.status, 0, r.stderr); return r.stdout.trim(); };
-  const origin = path.join(root, "origin.git");
-  git(root, "init", "-q", "--bare", "-b", "main", origin);
-  const wiki = path.join(root, "wiki");
-  git(root, "clone", "-q", origin, wiki);
-  git(wiki, "config", "user.email", "t@example.com");
-  git(wiki, "config", "user.name", "t");
-  const rel = "Private/v.md";
-  fs.mkdirSync(path.join(wiki, "Private"));
-  fs.mkdirSync(path.join(wiki, "scripts"));
-  fs.writeFileSync(path.join(wiki, rel), SHARED_NOTE);
-  // 假的 lint：記下 CYCLONE_WIKI_ROOT；LINT_FAIL 存在就失敗
-  fs.writeFileSync(path.join(wiki, "scripts", "wiki-lint.sh"), `echo "$CYCLONE_WIKI_ROOT" >> "${root}/lint-roots"; test ! -e "${root}/LINT_FAIL"\n`);
-  fs.writeFileSync(path.join(wiki, "scripts", "privacy-scan.sh"), "exit 0\n");
-  git(wiki, "add", ".");
-  git(wiki, "commit", "-q", "-m", "init");
-  git(wiki, "push", "-q", "origin", "HEAD:main");
-  const { writeToWiki } = await import("../scripts/vocab-harvest.mjs");
-  const worktrees = path.join(root, "wt");
-  fs.mkdirSync(worktrees);
-  const done = writeToWiki({ wiki, rel, add: { fixed: [["Zeeb", "Zeabur"]], hints: [] }, message: "harvest", worktrees });
-  assert.match(done.sha, /^[0-9a-f]{7,}$/);
-  // 本機正本還沒更新就再收一次：對 origin/main 再比，不重複寫、不多一個 commit
-  const head = git(wiki, "rev-parse", "origin/main");
-  const again = writeToWiki({ wiki, rel, add: { fixed: [["Zeeb", "Zeabur"]], hints: [["夜圈", "葉圈"]] }, message: "harvest", worktrees });
-  assert.deepEqual(again, { sha: "", fixed: [], hints: [], skipped: 2 });
-  git(wiki, "fetch", "-q", "origin");
-  assert.equal(git(wiki, "rev-parse", "origin/main"), head);
-  git(wiki, "fetch", "-q", "origin");
-  assert.match(git(wiki, "show", `origin/main:${rel}`), /- Zeeb → Zeabur/);
-  assert.deepEqual(fs.readdirSync(worktrees), [], "暫時 worktree 已移除");
-  assert.match(fs.readFileSync(path.join(root, "lint-roots"), "utf8"), /-vocab-harvest-/, "lint 在暫時 worktree 裡跑");
-  // lint 不過：不 commit、不 push，worktree 照樣清掉
-  fs.writeFileSync(path.join(root, "LINT_FAIL"), "");
-  assert.throws(() => writeToWiki({ wiki, rel, add: { fixed: [["Qux", "Quux"]], hints: [] }, message: "harvest", worktrees }), /wiki-lint\.sh/);
-  fs.rmSync(path.join(root, "LINT_FAIL"));
-  // 掃描不過：只說哪支沒過，不印它的輸出
-  git(wiki, "pull", "-q", "--ff-only");
-  fs.writeFileSync(path.join(wiki, "scripts", "privacy-scan.sh"), "echo 'hit: secret-ish-text'; exit 1\n");
-  git(wiki, "commit", "-qam", "scan");
-  git(wiki, "push", "-q", "origin", "HEAD:main");
-  assert.throws(() => writeToWiki({ wiki, rel, add: { fixed: [["Qux", "Quux"]], hints: [] }, message: "harvest", worktrees }), (e) => /privacy-scan\.sh .*failed$/.test(e.message) && !e.message.includes("secret-ish"));
-  git(wiki, "fetch", "-q", "origin");
-  assert.doesNotMatch(git(wiki, "show", `origin/main:${rel}`), /Qux/);
-  assert.deepEqual(fs.readdirSync(worktrees), []);
 });
 
 // ---- shipped profile ------------------------------------------------------------

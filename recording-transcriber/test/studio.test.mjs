@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import * as ops from "../lib/cue-ops.mjs";
 import { icloudStudioDir, isOffline, markAiCues, parseSrt, projectDirFor, readProject, validateCues, writeProject } from "../lib/studio-project.mjs";
 import { copyToDriveIsolated } from "../lib/studio-drive.mjs";
-import { createStudio, needsCc, shortKey } from "../scripts/subtitle-studio.mjs";
+import { createStudio, isPlain, needsCc, shortKey } from "../scripts/subtitle-studio.mjs";
 import { fakeRecapFiles } from "./fake-recap-files.mjs";
 import { runSubtitle } from "../scripts/subtitle-run.mjs";
 import { addCorrection } from "../lib/corrections-sync.mjs";
@@ -123,6 +123,7 @@ async function startStudio(t, extra = {}) {
       // 字寬固定用估算、影片當 1080p：測試不跑 osascript／ffprobe（#55）
       measureAdvances: () => ({}),
       videoSize: () => ({ w: 1920, h: 1080 }),
+      askWiki: () => null,   // 不讀這台的個人設定（#192）
       async prepareSubtitles(o, { work, onStep }) {
         calls.prepare += 1;
         calls.prepareOpts = o;
@@ -189,12 +190,16 @@ async function startStudio(t, extra = {}) {
   return { dir, port, video, calls, req, waitFor, release, releaseBurn, studio };
 }
 
+// 「最近」清單（狀態資料夾的 recent.json）裡的專案 id；整理視窗的資料只讀那一支（#184、#186 起沒有 /api/home）
+const recentIds = (s) => { try { return JSON.parse(fs.readFileSync(path.join(s.dir, "state", "recent.json"), "utf8")).map((r) => createHash("sha256").update(path.resolve(r.dir)).digest("hex").slice(0, 16)); } catch { return []; } };
+const manage = async (s, id) => (await s.req("GET", `/api/projects/${id}/manage`)).json;
+
 test("studio refuses other hosts, cross-site origins and missing tokens", async (t) => {
   const s = await startStudio(t);
-  assert.equal((await s.req("GET", "/api/home", { headers: { Host: "evil.example:80" } })).status, 403, "DNS rebinding");
-  assert.equal((await s.req("GET", "/api/home", { headers: { Origin: "https://evil.example" } })).status, 403);
-  assert.equal((await s.req("GET", "/api/home", { headers: { "Sec-Fetch-Site": "cross-site" } })).status, 403);
-  assert.equal((await s.req("GET", "/api/home", { headers: { "X-Studio-Token": "wrong" } })).status, 403);
+  assert.equal((await s.req("GET", "/api/tools", { headers: { Host: "evil.example:80" } })).status, 403, "DNS rebinding");
+  assert.equal((await s.req("GET", "/api/tools", { headers: { Origin: "https://evil.example" } })).status, 403);
+  assert.equal((await s.req("GET", "/api/tools", { headers: { "Sec-Fetch-Site": "cross-site" } })).status, 403);
+  assert.equal((await s.req("GET", "/api/tools", { headers: { "X-Studio-Token": "wrong" } })).status, 403);
   assert.equal((await s.req("POST", "/api/open", { headers: { "X-Studio-Token": "" }, body: { video: s.video, privacy: "public" } })).status, 403);
   assert.equal(s.calls.prepare, 0);
   const page = await s.req("GET", "/", { headers: { "X-Studio-Token": "" } });
@@ -204,7 +209,10 @@ test("studio refuses other hosts, cross-site origins and missing tokens", async 
   const csp = page.headers["content-security-policy"];
   assert.match(csp, /script-src 'self'(;|$)/, "頁面沒有 inline script，script-src 不留 unsafe-inline（#163）");
   assert.doesNotMatch(csp.match(/script-src[^;]*/)[0], /unsafe/);
-  assert.equal((await s.req("GET", "/api/home")).status, 200);
+  // YouTube 連結（#181）：只放行 youtube-nocookie 的嵌入框，script 照樣只收自己
+  assert.equal(csp.match(/frame-src[^;]*/)[0], "frame-src https://www.youtube-nocookie.com");
+  assert.doesNotMatch(csp, /youtube\.com\/iframe_api|script-src[^;]*youtube/);
+  assert.equal((await s.req("GET", "/api/tools")).status, 200);
 });
 
 test("open → process → edit with revisions → burn; SRT and description are always current", async (t) => {
@@ -243,9 +251,32 @@ test("open → process → edit with revisions → burn; SRT and description are
   const again = await s.req("POST", "/api/open", { body: { video: s.video, privacy: "public" } });
   assert.deepEqual(again.json, { id, reopened: true });
   assert.equal(s.calls.prepare, 1);
-  const home = await s.req("GET", "/api/home");
-  assert.equal(home.json.recent[0].id, id);
-  assert.deepEqual(home.json.videos.map((v) => v.name), ["v.mp4"], "燒好的 -字幕.mp4 不列進來");
+  assert.equal(recentIds(s)[0], id);
+  assert.deepEqual((await s.req("GET", "/api/library")).json.folders[0].videos.map((v) => v.name), ["v.mp4"], "燒好的 -字幕.mp4 不列進來");
+});
+
+// 舊首頁的路由（#184 起頁面不用）拿掉了（#186）；工具清單與「⋯」整理視窗的資料都要 token，整理只讀那一支、不掃影片資料夾
+test("the old home routes are gone; tools and the per-project manage info need the token and do not scan folders", async (t) => {
+  let scans = 0;
+  const s = await startStudio(t, { deps: { videoDirs: () => { scans += 1; return []; } } });
+  const { id } = (await s.req("POST", "/api/open", { body: { video: s.video, privacy: "public" } })).json;
+  await s.waitFor(id, (x) => x.status === "ready");
+  for (const p of ["/api/home", "/api/recent", "/api/home/posters"]) assert.equal((await s.req("GET", p)).status, 404, p);
+  for (const p of ["/api/tools", `/api/projects/${id}/manage`]) {
+    assert.equal((await s.req("GET", p, { headers: { "X-Studio-Token": "wrong" } })).status, 403, `${p} 要 token`);
+    assert.equal((await s.req("GET", p, { headers: { Origin: "https://evil.example" } })).status, 403);
+  }
+  const before = scans;
+  const m = await s.req("GET", `/api/projects/${id}/manage`);
+  assert.equal(m.status, 200, m.raw);
+  assert.equal(scans, before, "不掃影片資料夾");
+  assert.equal(m.json.id, id);
+  assert.equal(m.json.status, "ready");
+  assert.equal(m.json.recent, true, "在最近清單上（可以只移出清單）");
+  assert.equal(m.json.busy, false);
+  assert.ok(m.json.bytes > 0);
+  assert.deepEqual(Object.keys((await s.req("GET", "/api/tools")).json), ["tools"]);
+  assert.equal((await s.req("GET", "/api/projects/0123456789abcdef/manage")).status, 404);
 });
 
 test("video streams with byte ranges for seeking", async (t) => {
@@ -563,6 +594,14 @@ test("the page scripts load in order without errors", async () => {
   assert.match(libs, /^window\.cutOps = cutOps;$/m);
   assert.match(libs, /^import \* as shortOps from "\/shorts\.mjs";$/m);
   assert.match(libs, /^window\.shortOps = shortOps;$/m);
+  assert.match(libs, /^import \* as chapterOps from "\/chapters\.mjs";$/m);
+  assert.match(libs, /^window\.chapterOps = chapterOps;$/m);
+  assert.match(libs, /^import \* as layoutOps from "\/studio-layout\.mjs";$/m);
+  assert.match(libs, /^window\.layoutOps = layoutOps;$/m);
+  assert.match(libs, /^import \* as askOps from "\/ask-ai\.mjs";$/m);
+  assert.match(libs, /^window\.askOps = askOps;$/m);
+  assert.match(libs, /^import \* as notesOps from "\/study-notes\.mjs";$/m);
+  assert.match(libs, /^window\.notesOps = notesOps;$/m);
   const classic = list.slice(1);
   assert.ok(classic.length >= 5);
   assert.equal(classic[0].src, "/studio/i18n.js", "介面語言的設定要比其他頁面程式先跑（#152）");
@@ -576,7 +615,7 @@ test("the page scripts load in order without errors", async () => {
   const ctx = vm.createContext({ document: stub, location: { hash: "" }, fetch: () => new Promise(() => {}), setTimeout, clearTimeout,
     setInterval, clearInterval, requestAnimationFrame: () => 0, cancelAnimationFrame() {}, AbortController, URL, URLSearchParams,
     console, ResizeObserver: stub, Image: stub, navigator: stub, matchMedia: stub, getComputedStyle: stub,
-    ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs") });
+    ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs"), chapterOps: await import("../lib/chapters.mjs"), layoutOps: await import("../lib/studio-layout.mjs"), askOps: await import("../lib/ask-ai.mjs"), notesOps: await import("../lib/study-notes.mjs") });
   ctx.window = ctx;
   ctx.addEventListener = () => {};
   for (const x of classic) {
@@ -609,6 +648,33 @@ function fakePage() {
   return { doc, stub, $: (s) => doc.querySelector(s) };
 }
 
+// 編輯頁三欄（#170）：拉一條分隔線能拉多寬，要扣「對面那一欄」，中間的影片才留得住 360px
+test("編輯頁分隔線：能拉多寬看對面那一欄，收起來的左欄算 0（#170；#184 起量外框）", async () => {
+  const vm = await import("node:vm");
+  const { doc, stub, $ } = fakePage();
+  let off = false;
+  const rect = (width) => () => ({ width });
+  $("#shell").getBoundingClientRect = rect(1000);
+  $("#lib").getBoundingClientRect = rect(248);
+  $("#right").getBoundingClientRect = rect(360);
+  $("#shell").classList = { contains: (c) => c === "lib-off" && off, toggle() {} };
+  $("#shell").style = { setProperty() {}, removeProperty() {}, getPropertyValue: () => "" };
+  const ctx = vm.createContext({ document: doc, location: { hash: "" }, history: stub, fetch: () => new Promise(() => {}), setTimeout: () => 0, clearTimeout() {},
+    setInterval: () => 0, clearInterval() {}, requestAnimationFrame: () => 0, cancelAnimationFrame() {}, AbortController, URL, URLSearchParams, TextEncoder,
+    console, ResizeObserver: stub, Image: stub, navigator: stub, matchMedia: stub, getComputedStyle: stub,
+    ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs"), chapterOps: await import("../lib/chapters.mjs"), layoutOps: await import("../lib/studio-layout.mjs"), askOps: await import("../lib/ask-ai.mjs"), notesOps: await import("../lib/study-notes.mjs") });
+  ctx.window = ctx;
+  ctx.addEventListener = () => {};
+  for (const x of pageScripts().slice(1)) new vm.Script(fs.readFileSync(new URL(`../web${x.src}`, import.meta.url), "utf8"), { filename: x.src }).runInContext(ctx);
+  const run = (code) => ({ ...vm.runInContext(code, ctx) });
+  assert.deepEqual(run(`splitLimit("splitL")`), { min: 200, max: 268 }, "拉左欄扣右欄：1000 − 360 − 360 − 12");
+  $("#shell").getBoundingClientRect = rect(1400);
+  $("#right").getBoundingClientRect = rect(504);
+  assert.deepEqual(run(`splitLimit("splitR")`), { min: 320, max: 780 }, "拉右欄扣左欄 248，不因為右欄自己多寬而變");
+  off = true;
+  assert.deepEqual(run(`splitLimit("splitR")`), { min: 320, max: 900 }, "左欄收起來算 0，右欄可以到自己的上限");
+});
+
 test("AI 更正名字的頁面：預覽、取消一組、套用並標成 AI 改過、加入錯字表、整批復原", async () => {
   const vm = await import("node:vm");
   const { doc, stub, $ } = fakePage();
@@ -629,7 +695,7 @@ test("AI 更正名字的頁面：預覽、取消一組、套用並標成 AI 改�
   const ctx = vm.createContext({ document: doc, location: { hash: "" }, history: stub, fetch, setTimeout: () => 0, clearTimeout() {},
     setInterval: () => 0, clearInterval() {}, requestAnimationFrame: () => 0, cancelAnimationFrame() {}, AbortController, URL, URLSearchParams, TextEncoder,
     console, ResizeObserver: stub, Image: stub, navigator: stub, matchMedia: stub, getComputedStyle: stub,
-    ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs") });
+    ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs"), chapterOps: await import("../lib/chapters.mjs"), layoutOps: await import("../lib/studio-layout.mjs"), askOps: await import("../lib/ask-ai.mjs"), notesOps: await import("../lib/study-notes.mjs") });
   ctx.window = ctx;
   ctx.addEventListener = () => {};
   for (const x of pageScripts().slice(1)) {
@@ -705,7 +771,13 @@ test("整理視窗：上傳過才出現「連原始錄影一起丟」，預設�
   const vm = await import("node:vm");
   const { doc, stub, $ } = fakePage();
   const calls = [];
-  const replies = { "POST /api/projects/0123456789abcdef/clear": { trashed: "v-字幕", moved: [], original_trashed: true } };
+  const recent = [
+    { id: "0123456789abcdef", name: "v", bytes: 5e6, outputs: [], youtube: { url: "https://youtu.be/V", needs_cc: true }, original_bytes: 4.6e9 },
+    { id: "fedcba9876543210", name: "w", bytes: 1, outputs: [] },
+  ];
+  const replies = { "POST /api/projects/0123456789abcdef/clear": { trashed: "v-字幕", moved: [], original_trashed: true },
+    "GET /api/tools": { tools: { proofreaders: { claude: {} }, ytdlp: true, soniox: true } },
+    "GET /api/projects/0123456789abcdef/manage": { ...recent[0], recent: true }, "GET /api/projects/fedcba9876543210/manage": { ...recent[1], recent: false } };
   const fetch = async (url, opts = {}) => {
     const key = `${opts.method || "GET"} ${url}`;
     if (!replies[key]) return new Promise(() => {});
@@ -715,32 +787,30 @@ test("整理視窗：上傳過才出現「連原始錄影一起丟」，預設�
   const ctx = vm.createContext({ document: doc, location: { hash: "" }, history: stub, fetch, setTimeout: () => 0, clearTimeout() {},
     setInterval: () => 0, clearInterval() {}, requestAnimationFrame: () => 0, cancelAnimationFrame() {}, AbortController, URL, URLSearchParams, TextEncoder,
     console, ResizeObserver: stub, Image: stub, navigator: stub, matchMedia: stub, getComputedStyle: stub,
-    ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs") });
+    ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs"), chapterOps: await import("../lib/chapters.mjs"), layoutOps: await import("../lib/studio-layout.mjs"), askOps: await import("../lib/ask-ai.mjs"), notesOps: await import("../lib/study-notes.mjs") });
   ctx.window = ctx;
   ctx.addEventListener = () => {};
   for (const x of pageScripts().slice(1)) {
     new vm.Script(fs.readFileSync(new URL(`../web${x.src}`, import.meta.url), "utf8"), { filename: x.src }).runInContext(ctx);
   }
   const run = (code) => vm.runInContext(code, ctx);
-  run(`homeRecent = ${JSON.stringify([
-    { id: "0123456789abcdef", name: "v", bytes: 5e6, outputs: [], youtube: { url: "https://youtu.be/V", needs_cc: true }, original_bytes: 4.6e9 },
-    { id: "fedcba9876543210", name: "w", bytes: 1, outputs: [] },
-  ])};`);
+  // 左欄的「整理…」打開時才讀最新的大小與上傳狀態（#184）
   // 沒上傳過：不出現、不提醒，清的時候不帶
-  run(`openManage("fedcba9876543210")`);
+  await run(`openManage("fedcba9876543210")`);
+  assert.equal($("#manageForget").hidden, true, "不在最近清單上：沒有清單可移出");
   assert.equal($("#manageOrigRow").hidden, true);
   assert.equal($("#manageCcWarn").hidden, true);
   assert.match($("#manageNote").textContent, /原始影片不動/);
   // 上傳過：出現、預設不勾、標出大小；還沒掛 CC 就提醒
   $("#manageOrig").checked = true;
-  run(`openManage("0123456789abcdef")`);
+  await run(`openManage("0123456789abcdef")`);
   assert.equal($("#manageOrigRow").hidden, false);
   assert.equal($("#manageOrig").checked, false, "每次打開都預設不勾");
   assert.equal($("#manageOrigSize").textContent, "（4.6 GB）");
   assert.equal($("#manageCcWarn").hidden, false);
   await $("#manageClear").onclick();
   assert.equal(calls.at(-1).body.trashOriginal, false, "沒勾就不丟原始錄影");
-  run(`openManage("0123456789abcdef")`);
+  await run(`openManage("0123456789abcdef")`);
   $("#manageOrig").checked = true;
   $("#manageOrig").onchange();
   assert.match($("#manageNote").textContent, /資料夾和原始錄影都會在垃圾桶.*清空垃圾桶/);
@@ -765,7 +835,7 @@ test("會後總結分頁：四頁切換、逐字稿用剪輯後的時間、複�
     setInterval: () => 0, clearInterval() {}, requestAnimationFrame: () => 0, cancelAnimationFrame() {}, AbortController, URL, URLSearchParams, TextEncoder,
     console, ResizeObserver: stub, Image: stub, navigator: { clipboard: { writeText: async (x) => { copied.push(x); } } }, matchMedia: stub, getComputedStyle: stub,
     RecapFiles: fakeRecapFiles,
-    ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs") });
+    ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs"), chapterOps: await import("../lib/chapters.mjs"), layoutOps: await import("../lib/studio-layout.mjs"), askOps: await import("../lib/ask-ai.mjs"), notesOps: await import("../lib/study-notes.mjs") });
   ctx.window = ctx;
   ctx.addEventListener = () => {};
   for (const x of pageScripts().slice(1)) {
@@ -826,7 +896,7 @@ test("延伸頁籤用會議 App 的共用 ExtPanel：送對的資料、產生／
   const ctx = vm.createContext({ document: doc, location: { hash: "" }, history: stub, fetch, setTimeout: () => 0, clearTimeout() {},
     setInterval: () => 0, clearInterval() {}, requestAnimationFrame: () => 0, cancelAnimationFrame() {}, AbortController, URL, URLSearchParams, TextEncoder,
     console, ResizeObserver: stub, Image: stub, navigator: { clipboard: { writeText: async (x) => { copied.push(x); } } }, matchMedia: stub, getComputedStyle: stub,
-    ExtPanel, ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs") });
+    ExtPanel, ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs"), chapterOps: await import("../lib/chapters.mjs"), layoutOps: await import("../lib/studio-layout.mjs"), askOps: await import("../lib/ask-ai.mjs"), notesOps: await import("../lib/study-notes.mjs") });
   ctx.window = ctx;
   ctx.addEventListener = () => {};
   for (const x of pageScripts().slice(1)) {
@@ -878,7 +948,7 @@ test("沒有會議 App 的共用元件時，延伸頁籤說明原因（#111）",
   const ctx = vm.createContext({ document: doc, location: { hash: "" }, history: stub, fetch: () => new Promise(() => {}), setTimeout: () => 0, clearTimeout() {},
     setInterval: () => 0, clearInterval() {}, requestAnimationFrame: () => 0, cancelAnimationFrame() {}, AbortController, URL, URLSearchParams, TextEncoder,
     console, ResizeObserver: stub, Image: stub, navigator: stub, matchMedia: stub, getComputedStyle: stub,
-    ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs") });
+    ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs"), chapterOps: await import("../lib/chapters.mjs"), layoutOps: await import("../lib/studio-layout.mjs"), askOps: await import("../lib/ask-ai.mjs"), notesOps: await import("../lib/study-notes.mjs") });
   ctx.window = ctx;
   ctx.addEventListener = () => {};
   for (const x of pageScripts().slice(1)) new vm.Script(fs.readFileSync(new URL(`../web${x.src}`, import.meta.url), "utf8"), { filename: x.src }).runInContext(ctx);
@@ -901,7 +971,7 @@ test("Drive 列（三個頁籤都有）：存好顯示位置與檔名、沒存�
   const ctx = vm.createContext({ document: doc, location: { hash: "" }, history: stub, fetch, setTimeout: () => 0, clearTimeout() {},
     setInterval: () => 0, clearInterval() {}, requestAnimationFrame: () => 0, cancelAnimationFrame() {}, AbortController, URL, URLSearchParams, TextEncoder,
     console, ResizeObserver: stub, Image: stub, navigator: stub, matchMedia: stub, getComputedStyle: stub,
-    ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs") });
+    ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs"), chapterOps: await import("../lib/chapters.mjs"), layoutOps: await import("../lib/studio-layout.mjs"), askOps: await import("../lib/ask-ai.mjs"), notesOps: await import("../lib/study-notes.mjs") });
   ctx.window = ctx;
   ctx.addEventListener = () => {};
   $('meta[name="studio-features"]').content = "drive";   // 有設定 studio_drive
@@ -971,7 +1041,7 @@ test("心智圖頁籤用會議 App 的共用 MindMap：App 沒提供時說明、
   const ctx = vm.createContext({ document: doc, location: { hash: "" }, history: stub, fetch, setTimeout: (f) => { timers.push(f); return timers.length; }, clearTimeout() {},
     setInterval: () => 0, clearInterval() {}, requestAnimationFrame: () => 0, cancelAnimationFrame() {}, AbortController, URL, URLSearchParams, TextEncoder,
     console, ResizeObserver: stub, Image: stub, navigator: stub, matchMedia: stub, getComputedStyle: stub,
-    MindMap, ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs") });
+    MindMap, ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs"), chapterOps: await import("../lib/chapters.mjs"), layoutOps: await import("../lib/studio-layout.mjs"), askOps: await import("../lib/ask-ai.mjs"), notesOps: await import("../lib/study-notes.mjs") });
   ctx.window = ctx;
   ctx.addEventListener = () => {};
   for (const x of pageScripts().slice(1)) new vm.Script(fs.readFileSync(new URL(`../web${x.src}`, import.meta.url), "utf8"), { filename: x.src }).runInContext(ctx);
@@ -1042,7 +1112,7 @@ test("會後總結：完整總結與短總結用共用 MdView 排版，複製仍
   const ctx = vm.createContext({ document: doc, location: { hash: "" }, history: stub, fetch: () => new Promise(() => {}), setTimeout: () => 0, clearTimeout() {},
     setInterval: () => 0, clearInterval() {}, requestAnimationFrame: () => 0, cancelAnimationFrame() {}, AbortController, URL, URLSearchParams, TextEncoder,
     console, ResizeObserver: stub, Image: stub, navigator: { clipboard: { writeText: async (x) => { copied.push(x); } } }, matchMedia: stub, getComputedStyle: stub,
-    MdView, ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs") });
+    MdView, ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs"), chapterOps: await import("../lib/chapters.mjs"), layoutOps: await import("../lib/studio-layout.mjs"), askOps: await import("../lib/ask-ai.mjs"), notesOps: await import("../lib/study-notes.mjs") });
   ctx.window = ctx;
   ctx.addEventListener = () => {};
   for (const x of pageScripts().slice(1)) new vm.Script(fs.readFileSync(new URL(`../web${x.src}`, import.meta.url), "utf8"), { filename: x.src }).runInContext(ctx);
@@ -1073,7 +1143,7 @@ test("會後的頁籤與 Drive 那一行用 App 的共用圖示，沒有元件�
     const ctx = vm.createContext({ document: doc, location: { hash: "" }, history: stub, fetch: () => new Promise(() => {}), setTimeout: () => 0, clearTimeout() {},
       setInterval: () => 0, clearInterval() {}, requestAnimationFrame: () => 0, cancelAnimationFrame() {}, AbortController, URL, URLSearchParams, TextEncoder,
       console, ResizeObserver: stub, Image: stub, navigator: stub, matchMedia: stub, getComputedStyle: stub,
-      ...(MeetingIcons ? { MeetingIcons } : {}), ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs") });
+      ...(MeetingIcons ? { MeetingIcons } : {}), ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs"), chapterOps: await import("../lib/chapters.mjs"), layoutOps: await import("../lib/studio-layout.mjs"), askOps: await import("../lib/ask-ai.mjs"), notesOps: await import("../lib/study-notes.mjs") });
     ctx.window = ctx;
     ctx.addEventListener = () => {};
     for (const x of pageScripts().slice(1)) new vm.Script(fs.readFileSync(new URL(`../web${x.src}`, import.meta.url), "utf8"), { filename: x.src }).runInContext(ctx);
@@ -1102,7 +1172,7 @@ test("page assets are served from an exact allow-list only", async (t) => {
     assert.doesNotMatch(x.raw, /\btok\b/, "靜態檔不帶 token");
   }
   // 共用模組：短片模組會 import ./subtitle-box.mjs（#55），瀏覽器要拿得到
-  for (const lib of ["/cue-ops.mjs", "/cuts.mjs", "/shorts.mjs", "/subtitle-box.mjs"]) {
+  for (const lib of ["/cue-ops.mjs", "/cuts.mjs", "/shorts.mjs", "/subtitle-box.mjs", "/chapters.mjs", "/studio-layout.mjs", "/ask-ai.mjs", "/study-notes.mjs"]) {
     const x = await s.req("GET", lib);
     assert.equal(x.status, 200, lib);
     for (const m of x.raw.matchAll(/from "\.\/([\w-]+\.mjs)"/g)) assert.equal((await s.req("GET", `/${m[1]}`)).status, 200, `${lib} import 的 ${m[1]}`);
@@ -1115,34 +1185,9 @@ test("page assets are served from an exact allow-list only", async (t) => {
   }
 });
 
-// ---- 首頁縮圖與圖示（recording-transcriber#18）----
-test("home lists videos with posters streamed from memory, skipping iCloud placeholders", async (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rt-studio-"));
-  const cloudDir = path.join(dir, "icloud");
-  fs.mkdirSync(cloudDir);
-  fs.writeFileSync(path.join(cloudDir, "far.mp4"), "x");
-  const asked = [];
-  const s = await startStudio(t, { dir, deps: {
-    videoDirs: () => [dir, cloudDir],
-    icloudDir: () => cloudDir,
-    isOffline: (f) => f.endsWith("far.mp4"),   // 還沒下載到這台的佔位檔
-    async poster(video) { asked.push(path.basename(video)); return { jpg: Buffer.from([0xff, 0xd8, 0xff, 0xd9]), duration_ms: 65_000 }; },
-  } });
-  const home = await s.req("GET", "/api/home");
-  const byName = Object.fromEntries(home.json.videos.map((v) => [v.name, v]));
-  assert.match(byName["v.mp4"].key, /^[0-9a-f]{16}$/);
-  assert.deepEqual([byName["v.mp4"].offline, byName["v.mp4"].icloud], [false, false]);
-  assert.deepEqual([byName["far.mp4"].offline, byName["far.mp4"].icloud], [true, true], "iCloud 收件匣的影片標出來（#20）");
-  assert.equal((await s.req("GET", "/api/home/posters", { headers: { "X-Studio-Token": "" } })).status, 403, "縮圖也要 token");
-  assert.equal((await s.req("GET", "/api/home/posters", { headers: { Origin: "https://evil.example" } })).status, 403);
-  const before = fs.readdirSync(dir).sort();
-  const lines = (await s.req("GET", "/api/home/posters")).raw.trim().split("\n").map((l) => JSON.parse(l));
-  assert.deepEqual(lines.map((l) => l.key), [byName["v.mp4"].key], "還在 iCloud 的不抓縮圖（會先整支下載）");
-  assert.equal(lines[0].duration_ms, 65_000);
-  assert.deepEqual([...Buffer.from(lines[0].jpg, "base64")], [0xff, 0xd8, 0xff, 0xd9]);
-  assert.deepEqual(fs.readdirSync(dir).sort(), before, "縮圖不寫檔");
-  await s.req("GET", "/api/home/posters");
-  assert.deepEqual(asked, ["v.mp4"], "第二次直接用記憶體裡的");
+// ---- App 圖示（recording-transcriber#18）----
+test("the app icon is served for /app-icon.png and the browser's default /favicon.ico", async (t) => {
+  const s = await startStudio(t);
   const icon = await s.req("GET", "/app-icon.png");
   assert.equal(icon.status, 200);
   assert.equal(icon.headers["content-type"], "image/png");
@@ -1215,21 +1260,6 @@ test("an iCloud download is asked again after 30 seconds, and a brctl failure is
   assert.doesNotMatch(failed.json.error, /far\.mp4/, "錯誤訊息不帶完整路徑");
   assert.equal((await open()).status, 202, "再點一次就重新請 iCloud 下載");
   assert.equal(asked.length, 3);
-});
-
-test("a real poster: one frame and the length, read without writing files", { skip: spawnSync("ffmpeg", ["-version"]).status !== 0 && "no ffmpeg" }, async (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rt-poster-"));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const video = path.join(dir, "lesson.mp4");
-  const mk = spawnSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=s=160x120:r=10:d=8", "-c:v", "libx264", "-pix_fmt", "yuv420p", video], { encoding: "utf8" });
-  assert.equal(mk.status, 0, mk.stderr);
-  const { poster } = await import("../lib/media-preview.mjs");
-  const p = await poster(video);
-  assert.ok(Math.abs(p.duration_ms - 8000) < 100, String(p.duration_ms));
-  assert.ok(p.jpg.subarray(0, 2).equals(Buffer.from([0xff, 0xd8])), "JPEG");
-  assert.deepEqual(fs.readdirSync(dir), ["lesson.mp4"]);
-  const none = await poster(path.join(dir, "nope.mp4"));
-  assert.deepEqual(none, { jpg: null, duration_ms: 0 }, "讀不到就沒有縮圖，不丟錯");
 });
 
 test("previewing a video before opening it: playback, thumbnails and waveform, nothing written", { skip: spawnSync("ffmpeg", ["-version"]).status !== 0 && "no ffmpeg" }, async (t) => {
@@ -1314,7 +1344,7 @@ test("burned and plain exports are recorded separately and listed on the home pa
   assert.equal(p.outputs.cut.cuts, "1100-2100", "剪接版記下當時的剪輯");
   assert.equal(p.outputs.burn.file, "v-字幕.mp4");
   assert.equal(p.outputs.burn.rev, p.rev);
-  const home = (await s.req("GET", "/api/home")).json.recent.find((x) => x.id === id);
+  const home = await manage(s, id);
   assert.deepEqual(home.outputs.sort(), ["v-剪輯.mp4", "v-字幕.mp4"]);
   assert.ok(home.bytes > 0);
   assert.equal(home.busy, false);
@@ -1342,7 +1372,7 @@ test("clearing a project moves the exports beside the video and trashes the fold
   await s.waitFor(id, (x) => x.job?.kind === "burn");
   const busy = await s.req("POST", `/api/projects/${id}/clear`, { body: {} });
   assert.equal(busy.status, 409, "處理中不能清");
-  assert.equal((await s.req("GET", "/api/home")).json.recent[0].busy, true);
+  assert.equal((await manage(s, id)).busy, true);
   s.releaseBurn();
   await s.waitFor(id, (x) => x.burn?.status === "done");
   fs.writeFileSync(path.join(s.dir, "v-字幕.mp4"), "older");   // 原片旁邊已經有同名的檔案
@@ -1354,7 +1384,7 @@ test("clearing a project moves the exports beside the video and trashes the fold
   assert.deepEqual(trashed.map((f) => path.basename(f)), ["v-字幕"]);
   assert.ok(!fs.existsSync(projectDirFor(s.video)));
   assert.ok(fs.existsSync(s.video), "原片不動");
-  assert.deepEqual((await s.req("GET", "/api/home")).json.recent, [], "從清單拿掉");
+  assert.deepEqual(recentIds(s), [], "從清單拿掉");
   assert.equal((await s.req("GET", `/api/projects/${id}`)).status, 404);
   // 不保留輸出：影片跟著資料夾進垃圾桶
   fs.rmSync(path.join(trashDir, "v-字幕"), { recursive: true });
@@ -1375,7 +1405,7 @@ test("a failed trash keeps the project listed", async (t) => {
   const r = await s.req("POST", `/api/projects/${id}/clear`, { body: {} });
   assert.equal(r.status, 400);
   assert.match(r.json.error, /垃圾桶/);
-  assert.equal((await s.req("GET", "/api/home")).json.recent.length, 1);
+  assert.equal(recentIds(s).length, 1);
 });
 
 test("the editor timeline gets thumbnails and the waveform of the project video", async (t) => {
@@ -1850,7 +1880,7 @@ test("uploading: original video plus CC captions, added to a playlist; the recor
   assert.equal(p.youtube.studio_url, "https://studio.youtube.com/video/VID123/edit");
   assert.deepEqual(p.youtube.warnings, []);
   assert.equal(p.youtube.channel_title, "Cyclone 的頻道");
-  assert.equal((await s.req("GET", "/api/home")).json.recent[0].status, "ready");
+  assert.equal((await manage(s, id)).status, "ready");
 });
 
 test("uploading exports first when needed: a cut video for CC captions, a burned one otherwise", async (t) => {
@@ -2081,7 +2111,7 @@ test("clearing an uploaded recording can trash the original too, never before it
   const original = fs.readFileSync(s.video);
   let id = (await s.req("POST", "/api/open", { body: { video: s.video, privacy: "public" } })).json.id;
   await s.waitFor(id, (x) => x.status === "ready");
-  let home = (await s.req("GET", "/api/home")).json.recent[0];
+  let home = await manage(s, id);
   assert.equal(home.original_bytes, undefined, "還沒上傳：首頁不給這個選項");
   const early = await s.req("POST", `/api/projects/${id}/clear`, { body: { trashOriginal: true } });
   assert.equal(early.status, 409);
@@ -2091,7 +2121,7 @@ test("clearing an uploaded recording can trash the original too, never before it
 
   await s.req("POST", `/api/projects/${id}/youtube`, { body: { channel: "UC123", title: "t", subtitles: "burned", alsoCc: false } });
   await s.waitFor(id, (x) => !x.job && x.youtube?.status === "done");
-  home = (await s.req("GET", "/api/home")).json.recent[0];
+  home = await manage(s, id);
   assert.equal(home.original_bytes, original.length);
   assert.deepEqual(home.youtube, { url: "https://youtu.be/VID123", needs_cc: true }, "還沒掛 CC：首頁知道要提醒");
   const r = await s.req("POST", `/api/projects/${id}/clear`, { body: { trashOriginal: true, keepOutputs: false } });
@@ -2106,7 +2136,7 @@ test("clearing an uploaded recording can trash the original too, never before it
   await s.waitFor(id, (x) => x.status === "ready");
   await s.req("POST", `/api/projects/${id}/youtube`, { body: { channel: "UC123", title: "t", subtitles: "cc" } });
   await s.waitFor(id, (x) => !x.job && x.youtube?.status === "done");
-  assert.equal((await s.req("GET", "/api/home")).json.recent[0].youtube.needs_cc, false, "CC 掛好了就不提醒");
+  assert.equal((await manage(s, id)).youtube.needs_cc, false, "CC 掛好了就不提醒");
   failOriginal = true;
   const r2 = await s.req("POST", `/api/projects/${id}/clear`, { body: { trashOriginal: true } });
   assert.equal(r2.status, 200, r2.raw);
@@ -2837,15 +2867,67 @@ test("a YouTube video with author captions downloads, skips recognition and is t
   assert.ok(!fs.readdirSync(s.dl).some((n) => n.startsWith(".dl-")), "下載的暫存資料夾收掉了");
   assert.ok(fs.existsSync(path.join(p.folder, "captions.en.vtt")));
   assert.match(fs.readFileSync(path.join(p.folder, "subtitles.zh-TW.srt"), "utf8"), /譯1:Hello there/);
-  // 首頁的影片清單看得到下載資料夾
-  const home = (await s.req("GET", "/api/home")).json;
-  assert.ok(home.recent.some((x) => x.id === imp.project && x.downloaded && x.foreign));
+  // 整理視窗知道這支是下載的外語片
+  const m = await manage(s, imp.project);
+  assert.ok(m.downloaded && m.foreign);
   // 同一支再貼一次：不重新下載，直接打開
   const again = await s.waitImport((await s.req("POST", "/api/import", { body: { url: `https://youtu.be/${YT}` } })).json.import, (x) => x.status !== "running");
   assert.equal(again.status, "done");
   assert.equal(again.reopened, true);
   assert.equal(again.project, imp.project);
   assert.equal(s.y.video, 1);
+});
+
+// 「不要字幕」只認那個流程建的專案；網址匯入時影片沒有字幕軌（改用 Soniox）不算（#173；20261022 教學觀摩就被誤判過）
+test("isPlain only matches projects made with 'no subtitles', not imports without a caption track", () => {
+  assert.equal(isPlain({ source: { kind: "none", captions: "none" } }), true);
+  assert.equal(isPlain({ source: { kind: "youtube", captions: "none" } }), false);
+  assert.equal(isPlain({ source: { kind: "facebook", captions: "none" } }), false);
+  assert.equal(isPlain({ source: { kind: "youtube", captions: "author" } }), false);
+  assert.equal(isPlain({}), false);
+});
+
+// Facebook、X（#173）：認得的網址才收，要先選語言；交給 yt-dlp 的是組好的標準網址；檔名用 yt-dlp 的影片 id 判斷下載過沒
+test("a Facebook share link downloads with the chosen language and the standard url; X and Threads are checked too", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rt-fb-"));
+  const dl = path.join(dir, "YouTube 下載");
+  const seen = { info: [], video: [] };
+  const s = await startStudio(t, { dir, deps: {
+    hasYtDlp: () => true,
+    downloadDir: () => dl,
+    async fetchInfo(target) { seen.info.push(target); return pickInfo({ id: "1538098994747394", title: "古希臘城市", uploader: "Jerry", webpage_url: "https://www.facebook.com/reel/1538098994747394" }); },
+    async fetchVideo(target, tmp) { seen.video.push(target); const f = path.join(tmp, "古希臘城市 [1538098994747394].mp4"); fs.writeFileSync(f, "mp4"); return f; },
+    async fetchCaptions() { throw new Error("沒有作者字幕，不該抓"); },
+  } });
+  assert.equal((await s.req("POST", "/api/import", { body: { url: "https://www.threads.net/@someone/post/abc" } })).status, 400, "Threads 不收");
+  const noLang = await s.req("POST", "/api/import", { body: { url: "https://www.facebook.com/share/v/1HT2wpcnyZ/?mibextid=x" } });
+  assert.equal(noLang.status, 400);
+  assert.equal(noLang.json.error, "Facebook 的影片看不出說的是哪種語言，請先在旁邊選好語言");
+  assert.match((await s.req("POST", "/api/import", { body: { url: "https://x.com/someone/status/719944021058060289" } })).json.error, /^X 的影片看不出/);
+  assert.equal(seen.info.length, 0, "沒選語言就不去抓");
+
+  const r = await s.req("POST", "/api/import", { body: { url: "https://www.facebook.com/share/v/1HT2wpcnyZ/?mibextid=x", lang: "zh" } });
+  assert.equal(r.status, 200, r.raw);
+  let imp;
+  for (let i = 0; i < 200; i++) { imp = (await s.req("GET", `/api/import/${r.json.import}`)).json; if (imp.status !== "running") break; await new Promise((x) => setTimeout(x, 20)); }
+  assert.equal(imp.status, "done", imp.error);
+  assert.deepEqual(seen.info, ["https://www.facebook.com/share/v/1HT2wpcnyZ/"], "交給 yt-dlp 的是組好的標準網址，不是貼上的字串");
+  assert.deepEqual(seen.video, ["https://www.facebook.com/share/v/1HT2wpcnyZ/"]);
+  const p = (await s.req("GET", `/api/projects/${imp.project}`)).json;
+  assert.equal(p.source.kind, "facebook");
+  assert.equal(p.source.id, "1538098994747394", "記 yt-dlp 的影片 id");
+  assert.equal(p.source.url, "https://www.facebook.com/reel/1538098994747394");
+  assert.equal(p.source.downloaded, true);
+  assert.equal(p.lang, "zh");
+  assert.equal(p.foreign, false, "選中文就不翻譯");
+  assert.equal(p.source.captions, "none", "影片本身沒有字幕軌");
+  assert.equal(p.plain, false, "沒有字幕軌、改用 Soniox 的，不是「不要字幕」的專案");
+  assert.notEqual((await s.req("POST", `/api/projects/${imp.project}/ask`, { body: { question: "?" } })).json?.error, "這支影片是「不要字幕」的，沒有字幕可以做這件事");
+  // 同一支用另一種網址再貼：檔名裡的 [影片 id] 對得上，不重新下載
+  const again = await s.req("POST", "/api/import", { body: { url: "https://www.facebook.com/reel/1538098994747394", lang: "zh" } });
+  for (let i = 0; i < 200; i++) { imp = (await s.req("GET", `/api/import/${again.json.import}`)).json; if (imp.status !== "running") break; await new Promise((x) => setTimeout(x, 20)); }
+  assert.equal(imp.reopened, true);
+  assert.equal(seen.video.length, 1);
 });
 
 test("a YouTube video with only auto captions goes to Soniox with its language; a download can be stopped", async (t) => {
@@ -2992,10 +3074,10 @@ test("clearing a downloaded video can trash the download too, and never touches 
 test("installing yt-dlp while the studio runs is picked up without a restart", async (t) => {
   let have = false;
   const s = await startStudio(t, { deps: { hasYtDlp: () => have } });
-  assert.equal((await s.req("GET", "/api/home")).json.tools.ytdlp, false);
+  assert.equal((await s.req("GET", "/api/tools")).json.tools.ytdlp, false);
   assert.equal((await s.req("POST", "/api/import", { body: { url: "https://youtu.be/abcdefghijk" } })).status, 409);
   have = true;
-  assert.equal((await s.req("GET", "/api/home")).json.tools.ytdlp, true);
+  assert.equal((await s.req("GET", "/api/tools")).json.tools.ytdlp, true);
 });
 
 // 辨識與校對可以停止（#67）：假的 prepareSubtitles 和真的一樣，收到停止就丟 cancelled
@@ -3196,7 +3278,7 @@ test("Discord tracks page: found zip fills the table and is sent with start; the
   const ctx = vm.createContext({ document: doc, location: { hash: "" }, history: stub, fetch, setTimeout: () => 0, clearTimeout() {},
     setInterval: () => 0, clearInterval() {}, requestAnimationFrame: () => 0, cancelAnimationFrame() {}, AbortController, URL, URLSearchParams, TextEncoder,
     console, ResizeObserver: stub, Image: stub, navigator: stub, matchMedia: stub, getComputedStyle: stub,
-    ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs") });
+    ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs"), chapterOps: await import("../lib/chapters.mjs"), layoutOps: await import("../lib/studio-layout.mjs"), askOps: await import("../lib/ask-ai.mjs"), notesOps: await import("../lib/study-notes.mjs") });
   ctx.window = ctx;
   ctx.addEventListener = () => {};
   for (const x of pageScripts().slice(1)) {
@@ -3262,7 +3344,7 @@ test("Discord tracks: with a filled-in copy, clearing moves outputs next to the 
   assert.match(p.video, /v-補音\.mp4$/);
   await s.req("POST", `/api/projects/${id}/youtube`, { body: { channel: "UC123", title: "t", subtitles: "burned", alsoCc: false } });
   await s.waitFor(id, (x) => !x.job && x.youtube?.status === "done");
-  const home = (await s.req("GET", "/api/home")).json.recent[0];
+  const home = await manage(s, id);
   assert.equal(home.original_bytes, original.length, "原始錄影的大小，不是補音版");
   const outs = home.outputs;
   assert.ok(outs.length, "有燒好的影片");
@@ -3355,7 +3437,7 @@ test("start from an existing SRT/VTT: nearby files suggested, no recognition, ba
   assert.equal(seen.preflight.at(-1).engine, "none", "重新處理也不需要 Soniox 金鑰");
   assert.equal(fs.readFileSync(path.join(folder, "youtube-description.md"), "utf8"), "我的簡介");
 
-  await bad({ subtitles: path.join(s.dir, "v.srt") }, /整理/, "做過字幕的影片不換字幕來源");
+  await bad({ subtitles: path.join(s.dir, "v.srt") }, /影片庫.*「⋯」/, "做過字幕的影片不換字幕來源");
 
   // VTT 也可以；選檔窗只挑字幕檔
   const v2 = path.join(s.dir, "w.mp4");
@@ -3411,7 +3493,7 @@ test("no subtitles (#158): upload sends the original, never captions; with cuts 
   assert.equal(p.youtube.url, "https://youtu.be/VID123");
   assert.equal(g.meta.snippet.description, "", "沒給說明欄就是空的，不去寫");
   // 不用補 CC：首頁不提示，補 CC 的路擋掉
-  const recent = (await s.req("GET", "/api/home")).json.recent.find((x) => x.id === id);
+  const recent = await manage(s, id);
   assert.equal(recent.youtube.needs_cc, false);
   assert.equal((await s.req("POST", `/api/projects/${id}/captions`)).status, 409);
   assert.equal(needsCc({ video_id: "x", status: "cancelled", subtitles: "none" }), false, "停在半路的無字幕上傳也不用補 CC");
@@ -3452,7 +3534,7 @@ test("the ?t= media token is only accepted on browser media loads (#165)", async
   // 標頭 token 照舊可用在任何請求（fetch 也行）
   assert.notEqual((await s.req("GET", `/api/projects/${id}/video`, { headers: { "Sec-Fetch-Dest": "empty" } })).status, 403);
   // 其他 API 路徑本來就不收網址 token
-  assert.equal((await s.req("GET", "/api/home?t=tok", { headers: { "X-Studio-Token": "", "Sec-Fetch-Dest": "video" } })).status, 403);
+  assert.equal((await s.req("GET", "/api/tools?t=tok", { headers: { "X-Studio-Token": "", "Sec-Fetch-Dest": "video" } })).status, 403);
 });
 
 test("shared components are refused when a shipped pin does not match what is on disk (#165)", async (t) => {
@@ -3493,8 +3575,912 @@ test("the home page still loads when codex cannot list its features, as in the D
   process.env.CYCLONE_CODEX_BIN = fake;
   t.after(() => { if (prev === undefined) delete process.env.CYCLONE_CODEX_BIN; else process.env.CYCLONE_CODEX_BIN = prev; });
   const s = await startStudio(t);
-  const home = await s.req("GET", "/api/home");
+  const home = await s.req("GET", "/api/tools");
   assert.equal(home.status, 200, home.raw);
-  assert.ok(home.json.tools && "codex" in home.json.tools.proofreaders, "首頁的 tools.proofreaders 還在");
+  assert.ok(home.json.tools && "codex" in home.json.tools.proofreaders, "tools.proofreaders 還在");
   assert.equal(home.json.tools.proofreaders.codex, true, "指令在就算有裝（查不到功能清單要等真的跑校對才擋）");
+});
+
+// ---- Ask AI（#171）：對影片自由提問 ----
+test("Ask AI: asks with the subtitles as fenced material, keeps the chat in ask.json, history goes into the next prompt", async (t) => {
+  const asked = [];
+  const s = await startStudio(t, { description: "簡介\n\n00:00 開場\n00:03 怎麼用", deps: {
+    askAgent: async (system, prompt, opts) => { asked.push({ system, prompt, opts }); return { text: `回答${asked.length} 見 [00:00:03]` }; },
+  } });
+  const { id } = (await s.req("POST", "/api/open", { body: { video: s.video, privacy: "public" } })).json;
+  await s.waitFor(id, (x) => x.status === "ready");
+  assert.equal((await s.req("GET", `/api/projects/${id}/ask`, { headers: { "X-Studio-Token": "wrong" } })).status, 403, "要 token");
+  const empty = await s.req("GET", `/api/projects/${id}/ask`);
+  assert.deepEqual(empty.json, { messages: [], busy: false, templates: ["chapters", "quiz", "glossary", "actions"], sources: { agent: "claude", web: true, wiki: "off" } }, "中文影片沒有單字範本");
+
+  assert.equal((await s.req("POST", `/api/projects/${id}/ask`, { body: { question: "  " } })).status, 400);
+  assert.equal((await s.req("POST", `/api/projects/${id}/ask`, { body: { question: "長".repeat(2001) } })).status, 400);
+  assert.equal(asked.length, 0, "不合格的問題不送 AI");
+
+  const r1 = await s.req("POST", `/api/projects/${id}/ask`, { body: { question: "重點是什麼？", t_ms: 3100.6, template: "chapters" } });
+  assert.equal(r1.status, 200, r1.raw);
+  assert.deepEqual(r1.json.messages.map((m) => [m.role, m.text, m.t_ms, m.template]), [["user", "重點是什麼？", 3101, "chapters"], ["assistant", "回答1 見 [00:00:03]", 3101, undefined]]);
+  const [{ system, prompt, opts }] = asked;
+  assert.equal(opts.proofreader, "claude");
+  assert.ok(opts.signal, "可以停止");
+  assert.match(system, /【素材區開始】[\s\S]*#3 \[00:00:03\] 怎麼用[\s\S]*【素材區結束】/);
+  assert.match(system, /說明欄（簡介與章節）：\n簡介/);
+  assert.match(prompt, /目前播放時間：\[00:00:03\]/);
+  assert.match(prompt, /<question>\n重點是什麼？\n<\/question>/);
+  assert.match(prompt, /回答方式：/, "範本規則接在後面");
+  const file = path.join(projectDirFor(s.video), "ask.json");
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).messages.length, 2);
+
+  const r2 = await s.req("POST", `/api/projects/${id}/ask`, { body: { question: "再說一次", template: "vocab" } });
+  assert.equal(r2.json.messages.length, 4);
+  assert.equal(r2.json.messages[2].template, undefined, "中文影片不能用單字範本，當成沒選");
+  assert.equal(r2.json.messages[2].t_ms, undefined, "沒帶時間就不記");
+  assert.match(asked[1].prompt, /先前的對話[\s\S]*使用者：重點是什麼？[\s\S]*你：回答1/);
+  assert.doesNotMatch(asked[1].prompt, /回答方式：/);
+  assert.equal(asked[1].system, system, "同一支影片的 system prompt 不變（吃得到快取）");
+  assert.equal((await s.req("GET", `/api/projects/${id}/ask`)).json.messages.length, 4);
+
+  const cleared = await s.req("DELETE", `/api/projects/${id}/ask`);
+  assert.deepEqual(cleared.json, { messages: [] });
+  assert.ok(!fs.existsSync(file));
+  assert.deepEqual((await s.req("GET", `/api/projects/${id}/ask`)).json.messages, []);
+});
+
+test("Ask AI: one question at a time, stop closes it, failures keep the chat unchanged", async (t) => {
+  let release = null;
+  const s = await startStudio(t, { deps: {
+    askAgent: (system, prompt, { signal }) => new Promise((resolve, reject) => {
+      if (prompt.includes("壞掉")) return reject(new Error(`Claude timed out after: ${prompt.slice(-40)}`));
+      if (prompt.includes("空的")) return resolve({ text: "  " });
+      release = () => resolve({ text: "好了" });
+      signal.addEventListener("abort", () => reject(new Error("cancelled")));
+    }),
+  } });
+  const { id } = (await s.req("POST", "/api/open", { body: { video: s.video, privacy: "public" } })).json;
+  await s.waitFor(id, (x) => x.status === "ready");
+  assert.equal((await s.req("POST", `/api/projects/${id}/ask-stop`)).status, 409, "沒在問就沒得停");
+  const pending = s.req("POST", `/api/projects/${id}/ask`, { body: { question: "第一題" } });
+  for (let i = 0; i < 50 && !release; i++) await new Promise((r) => setTimeout(r, 10));
+  assert.equal((await s.req("GET", `/api/projects/${id}/ask`)).json.busy, true);
+  assert.equal((await s.req("POST", `/api/projects/${id}/ask`, { body: { question: "第二題" } })).status, 409, "一次一題");
+  assert.equal((await s.req("DELETE", `/api/projects/${id}/ask`)).status, 409, "回答中不能清除");
+  assert.equal((await s.req("POST", `/api/projects/${id}/ask-stop`)).status, 200);
+  const stopped = await pending;
+  assert.equal(stopped.status, 409);
+  assert.equal(stopped.json.error, "已經停止");
+  assert.deepEqual((await s.req("GET", `/api/projects/${id}/ask`)).json, { messages: [], busy: false, templates: ["chapters", "quiz", "glossary", "actions"], sources: { agent: "claude", web: true, wiki: "off" } }, "停掉的不記");
+  const logged = [], origError = console.error;
+  console.error = (...a) => { logged.push(a.join(" ")); };
+  let bad;
+  try { bad = await s.req("POST", `/api/projects/${id}/ask`, { body: { question: "壞掉的秘密問題" } }); } finally { console.error = origError; }
+  assert.equal(bad.status, 502);
+  assert.match(bad.json.error, /^AI 沒回答成功：Claude timed out/, "完整訊息只回給頁面");
+  assert.ok(logged.some((l) => l.includes("ask failed: timeout")), logged.join("\n"));
+  assert.ok(!logged.some((l) => l.includes("秘密")), "log 只記錯誤種類，不帶問題或回答");
+  assert.equal((await s.req("POST", `/api/projects/${id}/ask`, { body: { question: "空的" } })).status, 502);
+  assert.equal((await s.req("GET", `/api/projects/${id}/ask`)).json.messages.length, 0, "失敗不記");
+});
+
+test("Ask AI external sources: claude only, wiki needs a configured wiki CLI that is installed, sources asked and used are recorded (#192, #194)", async (t) => {
+  const asked = [];
+  let wiki = null;
+  const s = await startStudio(t, { deps: {
+    askWiki: () => wiki,
+    askAgent: async (system, prompt, opts) => { asked.push({ prompt, opts }); return { text: "見 [https://example.com](https://example.com)", tools: opts.sources?.web ? { WebSearch: 2 } : {} }; },
+  } });
+  const { id } = (await s.req("POST", "/api/open", { body: { video: s.video, privacy: "public" } })).json;
+  await s.waitFor(id, (x) => x.status === "ready");
+  assert.deepEqual((await s.req("GET", `/api/projects/${id}/ask`)).json.sources, { agent: "claude", web: true, wiki: "off" });
+
+  const plain = await s.req("POST", `/api/projects/${id}/ask`, { body: { question: "一般問題", sources: "web" } });
+  assert.equal(plain.status, 200, plain.raw);
+  assert.equal(asked[0].opts.sources, undefined, "沒勾（或格式不對）就不帶任何來源");
+  assert.doesNotMatch(asked[0].prompt, /開放你查外部資料/);
+
+  const web = await s.req("POST", `/api/projects/${id}/ask`, { body: { question: "原文連結？", sources: ["web", "nope"] } });
+  assert.equal(web.status, 200, web.raw);
+  assert.deepEqual(asked[1].opts.sources, { web: true, wiki: null });
+  assert.match(asked[1].prompt, /網路搜尋（WebSearch）/);
+  assert.deepEqual(web.json.messages.slice(-2).map((m) => m.sources), [["web"], ["web"]], "提問記勾了什麼、回答記實際查了什麼");
+
+  assert.equal((await s.req("POST", `/api/projects/${id}/ask`, { body: { question: "q", sources: ["wiki"] } })).json.error, "還沒設定 wiki：個人設定 asr-profile.json 要填 wiki_cli");
+  wiki = { name: "notes-cli", bin: "/nope/notes-cli", missing: true };
+  assert.equal((await s.req("GET", `/api/projects/${id}/ask`)).json.sources.wiki, "missing");
+  assert.equal((await s.req("POST", `/api/projects/${id}/ask`, { body: { question: "q", sources: ["wiki"] } })).json.error, "這台電腦找不到 wiki 查詢工具，不能查 wiki");
+  wiki = { name: "notes-cli", bin: "/x/notes-cli" };
+  const w = await s.req("POST", `/api/projects/${id}/ask`, { body: { question: "我的筆記怎麼說？", sources: ["wiki"] } });
+  assert.equal(w.status, 200, w.raw);
+  assert.deepEqual(asked[2].opts.sources, { web: false, wiki: { bin: "/x/notes-cli" } });
+  assert.deepEqual(w.json.messages.slice(-2).map((m) => m.sources), [["wiki"], undefined], "勾了但 agent 沒查就不標");
+  assert.equal(asked.length, 3, "被擋的不送 AI");
+
+  const file = path.join(projectDirFor(s.video), "project.json");
+  fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file, "utf8")), proofreader: "codex" }));
+  assert.deepEqual((await s.req("GET", `/api/projects/${id}/ask`)).json.sources, { agent: "codex", web: false, wiki: "ready" });
+  const r = await s.req("POST", `/api/projects/${id}/ask`, { body: { question: "q", sources: ["web"] } });
+  assert.equal(r.status, 409);
+  assert.equal(r.json.error, "網路搜尋和查 wiki 只有校對 agent 是 claude 時能用（這支影片是 codex）");
+  assert.equal(asked.length, 3);
+});
+
+test("Ask AI: content marked as personal data never goes to a China-cloud proofreader", async (t) => {
+  let calls = 0;
+  const s = await startStudio(t, { deps: { askAgent: async () => { calls += 1; return { text: "x" }; } } });
+  const { id } = (await s.req("POST", "/api/open", { body: { video: s.video, privacy: "public" } })).json;
+  await s.waitFor(id, (x) => x.status === "ready");
+  const file = path.join(projectDirFor(s.video), "project.json");
+  const p = JSON.parse(fs.readFileSync(file, "utf8"));
+  fs.writeFileSync(file, JSON.stringify({ ...p, privacy: "student-private", proofreader: "pi" }));
+  const r = await s.req("POST", `/api/projects/${id}/ask`, { body: { question: "這支在講什麼？" } });
+  assert.equal(r.status, 409);
+  assert.match(r.json.error, /含個資，不能交給 pi/);
+  assert.equal(calls, 0);
+});
+
+test("Ask AI 的頁面：送出帶目前時間與範本、回來換成伺服器的對話、失敗時問題放回輸入框（#171）", async () => {
+  const vm = await import("node:vm");
+  const { doc, stub, $ } = fakePage();
+  const calls = [], gets = [], timers = [];
+  let fail = false;
+  const fetch = async (url, opts = {}) => {
+    const key = `${opts.method || "GET"} ${url}`;
+    if (key === "GET /api/projects/0123456789abcdef/ask" && gets.length) { const j = gets.shift(); return { ok: true, status: 200, json: async () => j }; }
+    if (key !== "POST /api/projects/0123456789abcdef/ask") return new Promise(() => {});
+    const body = JSON.parse(opts.body);
+    calls.push(body);
+    if (fail) return { ok: false, status: 502, json: async () => ({ error: "AI 沒回答成功：Claude timed out" }) };
+    return { ok: true, status: 200, json: async () => ({ messages: [{ role: "user", text: body.question, t_ms: body.t_ms, at: "" }, { role: "assistant", text: "見 [00:00:05]", at: "" }] }) };
+  };
+  const ctx = vm.createContext({ document: doc, location: { hash: "" }, history: stub, fetch, setTimeout: (f, ms) => { if (ms === 3000) timers.push(f); return 0; }, clearTimeout() {},
+    setInterval: () => 0, clearInterval() {}, requestAnimationFrame: () => 0, cancelAnimationFrame() {}, AbortController, URL, URLSearchParams, TextEncoder,
+    console, ResizeObserver: stub, Image: stub, navigator: stub, matchMedia: stub, getComputedStyle: stub,
+    ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs"), chapterOps: await import("../lib/chapters.mjs"), layoutOps: await import("../lib/studio-layout.mjs"), askOps: await import("../lib/ask-ai.mjs"), notesOps: await import("../lib/study-notes.mjs") });
+  ctx.window = ctx;
+  ctx.addEventListener = () => {};
+  for (const x of pageScripts().slice(1)) new vm.Script(fs.readFileSync(new URL(`../web${x.src}`, import.meta.url), "utf8"), { filename: x.src }).runInContext(ctx);
+  const run = (code) => vm.runInContext(code, ctx);
+  run(`state.id = "0123456789abcdef"; state.p = { duration_ms: 60000 }; ask.templates = ["chapters"];`);
+  $("#video").currentTime = 12.3456;
+  $("#askWithTime").checked = true;
+  $("#askIn").value = "  重點是什麼？ ";
+  run(`ask.tpl = "chapters";`);
+  await run(`askSend()`);
+  assert.deepEqual(calls[0], { question: "重點是什麼？", t_ms: 12346, template: "chapters" });
+  assert.equal(run(`ask.messages.length`), 2);
+  assert.equal(run(`ask.busy`), false);
+  assert.equal(run(`ask.tpl`), "", "送出後範本用掉了");
+  assert.equal($("#askIn").value, "");
+
+  $("#askWithTime").checked = false;
+  fail = true;
+  await run(`askSend("第二題")`);
+  assert.deepEqual(calls[1], { question: "第二題" }, "沒勾附上時間就不帶");
+  assert.match($("#askNote").textContent, /AI 沒回答成功/);
+  assert.equal($("#askIn").value, "第二題", "沒問成功：問題放回輸入框");
+  assert.equal(run(`ask.messages.length`), 2, "對話不變");
+  assert.equal(run(`ask.hist.join("|")`), "重點是什麼？|第二題", "↑ 叫得回來");
+
+  // 重新整理前送出、伺服器還在回答：頁面每 3 秒再看一次，答完就出現
+  gets.push({ messages: [], busy: true, templates: [] }, { messages: [{ role: "user", text: "q", at: "" }, { role: "assistant", text: "a", at: "" }], busy: false, templates: [] });
+  run(`ask.pending = null;`);
+  await run(`loadAsk()`);
+  assert.equal(run(`ask.busy`), true);
+  assert.equal(timers.length, 1, "還在回答：排一次重讀");
+  await timers.shift()();
+  assert.equal(run(`ask.busy`), false);
+  assert.equal(run(`ask.messages.length`), 2);
+  assert.equal(timers.length, 0, "答完就不再重讀");
+
+  // 外部來源（#192）：勾了才帶 sources；不是 claude 時停用、取消勾選，硬勾也不帶；沒設定 wiki 就不顯示
+  fail = false;
+  run(`ask.src = { agent: "claude", web: true, wiki: "ready" }; renderAsk();`);
+  assert.equal($("#askWikiWrap").hidden, false);
+  assert.equal($("#askWeb").disabled, false);
+  $("#askWeb").checked = true;
+  $("#askWiki").checked = false;
+  await run(`askSend("原文連結？")`);
+  assert.deepEqual(calls.at(-1), { question: "原文連結？", sources: ["web"] });
+  run(`ask.src = { agent: "codex", web: false, wiki: "ready" }; renderAsk();`);
+  assert.equal($("#askWeb").disabled, true);
+  assert.equal($("#askWeb").checked, false);
+  assert.equal($("#askWiki").disabled, true);
+  assert.match($("#askWebWrap").title, /只有校對 agent 是 claude 時能用（這支影片是 codex）/);
+  $("#askWeb").checked = true;
+  await run(`askSend("再問")`);
+  assert.deepEqual(calls.at(-1), { question: "再問" });
+  run(`ask.src = { agent: "claude", web: true, wiki: "missing" }; renderAsk();`);
+  assert.equal($("#askWiki").disabled, true);
+  assert.match($("#askWikiWrap").title, /找不到 wiki 查詢工具/);
+  run(`ask.src = { agent: "claude", web: true, wiki: "off" }; renderAsk();`);
+  assert.equal($("#askWikiWrap").hidden, true);
+});
+
+// ---- 學習筆記（#172）----
+test("study notes: saved as notes.md (0600), read back including hand edits, validated, removed when empty", async (t) => {
+  const s = await startStudio(t);
+  const { id } = (await s.req("POST", "/api/open", { body: { video: s.video, privacy: "public" } })).json;
+  await s.waitFor(id, (x) => x.status === "ready");
+  const file = path.join(projectDirFor(s.video), "notes.md");
+  assert.equal((await s.req("GET", `/api/projects/${id}/notes`, { headers: { "X-Studio-Token": "wrong" } })).status, 403, "要 token");
+  assert.deepEqual((await s.req("GET", `/api/projects/${id}/notes`)).json, { notes: [] });
+
+  const put = await s.req("PUT", `/api/projects/${id}/notes`, { body: { notes: [{ t_ms: 3500, text: "**第二則**" }, { t_ms: 1000, text: "第一則\n- 重點" }, { t_ms: 2000, text: "  " }] } });
+  assert.equal(put.status, 200, put.raw);
+  assert.deepEqual(put.json.notes, [{ t_ms: 1000, text: "第一則\n- 重點" }, { t_ms: 3000, text: "**第二則**" }], "排序、空的不要、取整秒（和檔案一樣）");
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  assert.equal(fs.readFileSync(file, "utf8"), "# 學習筆記：v\n\n## 0:01\n第一則\n- 重點\n\n## 0:03\n**第二則**\n");
+
+  fs.writeFileSync(file, "# 我改過標題\n\n## 0:02\n手打的一則\n\n## 0:01\n第一則\n");
+  assert.deepEqual((await s.req("GET", `/api/projects/${id}/notes`)).json.notes, [{ t_ms: 1000, text: "第一則" }, { t_ms: 2000, text: "手打的一則" }], "手改的檔也讀得回來");
+
+  assert.equal((await s.req("PUT", `/api/projects/${id}/notes`, { body: { notes: "x" } })).status, 400);
+  assert.equal((await s.req("PUT", `/api/projects/${id}/notes`, { body: { notes: [{ t_ms: 1, text: "長".repeat(5001) }] } })).json.error, "每則筆記最多 5000 字");
+  assert.equal((await s.req("PUT", `/api/projects/${id}/notes`, { body: { notes: Array.from({ length: 301 }, () => ({ t_ms: 1, text: "x" })) } })).json.error, "筆記最多 300 則");
+  assert.match(fs.readFileSync(file, "utf8"), /手打的一則/, "不合格的不寫");
+  assert.equal((await s.req("POST", `/api/projects/${id}/notes`, { body: { notes: [] } })).status, 405);
+
+  assert.deepEqual((await s.req("PUT", `/api/projects/${id}/notes`, { body: { notes: [] } })).json, { notes: [] });
+  assert.ok(!fs.existsSync(file), "刪光就刪檔");
+});
+
+test("學習筆記的頁面：新增先暫停並掛在目前時間、儲存整份、空白就刪、Ask AI 回答可以存成筆記（#172）", async () => {
+  const vm = await import("node:vm");
+  const { doc, stub, $ } = fakePage();
+  const calls = [];
+  let paused = 0;
+  const fetch = async (url, opts = {}) => {
+    const key = `${opts.method || "GET"} ${url}`;
+    if (key !== "PUT /api/projects/0123456789abcdef/notes") return new Promise(() => {});
+    const body = JSON.parse(opts.body);
+    calls.push(body);
+    return { ok: true, status: 200, json: async () => ({ notes: body.notes.filter((n) => n.text.trim()).sort((a, b) => a.t_ms - b.t_ms) }) };
+  };
+  const ctx = vm.createContext({ document: doc, location: { hash: "" }, history: stub, fetch, setTimeout: () => 0, clearTimeout() {},
+    setInterval: () => 0, clearInterval() {}, requestAnimationFrame: () => 0, cancelAnimationFrame() {}, AbortController, URL, URLSearchParams, TextEncoder,
+    console, ResizeObserver: stub, Image: stub, navigator: stub, matchMedia: stub, getComputedStyle: stub,
+    ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs"), chapterOps: await import("../lib/chapters.mjs"), layoutOps: await import("../lib/studio-layout.mjs"), askOps: await import("../lib/ask-ai.mjs"), notesOps: await import("../lib/study-notes.mjs") });
+  ctx.window = ctx;
+  ctx.addEventListener = () => {};
+  for (const x of pageScripts().slice(1)) new vm.Script(fs.readFileSync(new URL(`../web${x.src}`, import.meta.url), "utf8"), { filename: x.src }).runInContext(ctx);
+  const run = (code) => vm.runInContext(code, ctx);
+  run(`state.id = "0123456789abcdef"; state.p = { duration_ms: 600000 };`);
+  $("#video").pause = () => { paused += 1; };
+  $("#video").currentTime = 65.4;
+  const input = { value: "", focus() {} };
+  $("#notesList").querySelector = (sel) => (sel === ".note-input" ? input : stub);
+
+  run(`addNoteAt(video.currentTime * 1000)`);
+  assert.equal(paused, 0, "筆記還沒讀到：不准新增（不然整份存回會蓋掉檔裡原本的）");
+  assert.equal(run(`notes.editing`), null);
+  run(`notes.loaded = true;`);
+  run(`notes.busy = true; addNoteAt(1000)`);
+  assert.equal(run(`notes.editing`), null, "正在存：先不打開編輯框");
+  run(`notes.busy = false;`);
+  run(`addNoteAt(video.currentTime * 1000)`);
+  assert.equal(paused, 1, "新增前先暫停");
+  assert.equal(run(`notes.editing`), "new");
+  assert.equal(run(`notes.newAt`), 65400);
+  input.value = "  記下來 ";
+  await run(`commitNote("new")`);
+  assert.deepEqual(calls[0], { notes: [{ t_ms: 65400, text: "記下來" }] });
+  assert.equal(run(`notes.editing`), null);
+  assert.equal(run(`notes.items.length`), 1);
+
+  run(`notes.editing = 0;`);
+  input.value = "   ";
+  await run(`commitNote("0")`);
+  assert.deepEqual(calls[1], { notes: [] }, "改成空白就是刪掉");
+
+  // Ask AI 的回答存成筆記：掛在提問當下的時間，先打開編輯框，太長的截到上限
+  run(`addNoteAt(12000, clipNote("答".repeat(6000)))`);
+  assert.equal(run(`notes.newAt`), 12000);
+  assert.equal(run(`[...notes.draft].length`), 5000);
+  assert.ok(run(`notes.draft.endsWith("…")`));
+});
+
+// #175：review 的 follow-up
+test("follow-ups (#175): the Ask AI draft survives reopening the same project; a collapsed list keeps its width through a resize", async () => {
+  const vm = await import("node:vm");
+  const { doc, stub, $ } = fakePage();
+  const store = new Map([["studio.libW", "300"], ["studio.rightW", "700"], ["studio.libOff", "1"]]);
+  const set = [];
+  const rect = (width) => () => ({ width });
+  let off = true;
+  $("#shell").getBoundingClientRect = rect(1400);
+  $("#lib").getBoundingClientRect = rect(0);
+  $("#right").getBoundingClientRect = rect(480);
+  $("#shell").classList = { contains: (c) => c === "lib-off" && off, toggle() {} };
+  $("#shell").style = { setProperty: (k, v) => set.push([k, v]), removeProperty() {}, getPropertyValue: () => "" };
+  const ctx = vm.createContext({ document: doc, location: { hash: "" }, history: stub, fetch: () => new Promise(() => {}), setTimeout: () => 0, clearTimeout() {},
+    setInterval: () => 0, clearInterval() {}, requestAnimationFrame: () => 0, cancelAnimationFrame() {}, AbortController, URL, URLSearchParams, TextEncoder,
+    console, ResizeObserver: stub, Image: stub, navigator: stub, matchMedia: stub, getComputedStyle: stub,
+    localStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) },
+    ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs"), chapterOps: await import("../lib/chapters.mjs"), layoutOps: await import("../lib/studio-layout.mjs"), askOps: await import("../lib/ask-ai.mjs"), notesOps: await import("../lib/study-notes.mjs") });
+  ctx.window = ctx;
+  ctx.addEventListener = () => {};
+  for (const x of pageScripts().slice(1)) new vm.Script(fs.readFileSync(new URL(`../web${x.src}`, import.meta.url), "utf8"), { filename: x.src }).runInContext(ctx);
+  const run = (code) => vm.runInContext(code, ctx);
+
+  run(`state.id = "aaaaaaaaaaaaaaaa"; askReset();`);
+  $("#askIn").value = "打到一半";
+  run(`askReset();`);
+  assert.equal($("#askIn").value, "打到一半", "同一支：留著");
+  run(`state.id = "bbbbbbbbbbbbbbbb"; askReset();`);
+  assert.equal($("#askIn").value, "", "換一支：清掉");
+
+  set.length = 0;   // 開機時套用記住的寬度那一次不算
+  run(`reclampSplits()`);
+  assert.deepEqual(set, [["--right-w", "700px"]], "收起來的左欄不動；右欄從記住的 700 夾，不是從目前的 480");
+  set.length = 0;
+  off = false;
+  $("#lib").getBoundingClientRect = rect(248);
+  run(`setLibOff(false, false)`);
+  assert.deepEqual(set, [["--lib-w", "300px"]], "打開左欄時照記住的 300");
+});
+
+test("follow-ups (#175): a proofreader that is not allowed for another reason is not reported as a privacy block", async (t) => {
+  const s = await startStudio(t, { deps: { askAgent: async () => ({ text: "x" }) } });
+  const { id } = (await s.req("POST", "/api/open", { body: { video: s.video, privacy: "public" } })).json;
+  await s.waitFor(id, (x) => x.status === "ready");
+  const file = path.join(projectDirFor(s.video), "project.json");
+  const p = JSON.parse(fs.readFileSync(file, "utf8"));
+  fs.writeFileSync(file, JSON.stringify({ ...p, proofreader: "nobody" }));
+  const r = await s.req("POST", `/api/projects/${id}/ask`, { body: { question: "?" } });
+  assert.equal(r.status, 409);
+  assert.equal(r.json.error, "這支影片設定的校對 agent（nobody）不能用；請換一個");
+});
+
+// ---- YouTube 連結專案（#181）：不下載影片，只抓作者字幕，嵌入播放 ----
+test("a YouTube link import fetches only info and author captions, makes an embed project, and blocks what needs a local video", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rt-link-"));
+  const dl = path.join(dir, "YouTube 下載"), links = path.join(dir, "YouTube 連結");
+  const seen = { info: [], video: 0, captions: [] };
+  let embeddable = true, subs = { "zh-TW": [] };
+  const s = await startStudio(t, { dir, deps: {
+    hasYtDlp: () => true,
+    downloadDir: () => dl,
+    linkDir: () => links,
+    async fetchInfo(id) { seen.info.push(id); return pickInfo({ id, title: "pstack 深度拆解：怎麼讓 AI/全自動", uploader: "Gary", language: "zh-Hant", duration: 1599, webpage_url: `https://www.youtube.com/watch?v=${id}`, playable_in_embed: embeddable, subtitles: subs, automatic_captions: { "en-orig": [] } }); },
+    async fetchVideo() { seen.video += 1; throw new Error("只連結不該下載影片"); },
+    async fetchCaptions(id, track, d) { seen.captions.push([id, track]); const f = path.join(d, `captions.${track}.vtt`); fs.writeFileSync(f, "WEBVTT\n\n00:00:00.000 --> 00:00:01.500\n大家好\n\n00:00:02.000 --> 00:00:03.000\n今天講pstack\n"); return f; },
+    async prepareFromCaptions(o, { cues }) { return { cues, applied: [], rejected: [], description: "說明\n\n00:00 開場", chapters: [], suggest: null, timing: null, report: { engine: "youtube-captions" } }; },
+    taiwanConverter: async () => (x) => x,
+  } });
+  const waitImport = async (key) => { for (let i = 0; i < 200; i++) { const r = (await s.req("GET", `/api/import/${key}`)).json; if (r.status !== "running") return r; await new Promise((x) => setTimeout(x, 20)); } throw new Error("import timed out"); };
+  const YID = "l_xDqUm0MDQ";
+  assert.equal((await s.req("POST", "/api/import", { body: { url: "https://www.facebook.com/reel/1538098994747394", lang: "zh", mode: "link" } })).json.error, "只有 YouTube 影片可以只連結；Facebook 和 X 要下載影片");
+
+  const imp = await waitImport((await s.req("POST", "/api/import", { body: { url: `https://youtu.be/${YID}`, mode: "link" } })).json.import);
+  assert.equal(imp.status, "done", imp.error);
+  assert.equal(seen.video, 0, "沒下載影片");
+  assert.deepEqual(seen.captions, [[YID, "zh-TW"]]);
+  const p = await s.waitFor(imp.project, (x) => x.status === "ready" && !x.job);
+  assert.equal(p.linked, true);
+  assert.deepEqual(p.embed, { id: YID });
+  assert.equal(p.video, "");
+  assert.equal(p.duration_ms, 1599000, "片長取自影片資訊");
+  assert.equal(p.source.mode, "embed");
+  assert.equal(p.source.url, `https://www.youtube.com/watch?v=${YID}`);
+  assert.deepEqual(p.cues.map((c) => c.text), ["大家好", "今天講pstack"]);
+  assert.equal(path.basename(p.folder), `pstack 深度拆解：怎麼讓 AI 全自動 [${YID}]-字幕`, "資料夾名稱拿掉不能用的字元（/ 換成空白，全形冒號可以留）");
+  assert.equal(fs.realpathSync(path.dirname(p.folder)), fs.realpathSync(links), "放在「YouTube 連結」，不和下載的同一支撞名");
+  assert.deepEqual(fs.readdirSync(links).filter((n) => !n.startsWith(".")), [path.basename(p.folder)], "只有字幕資料夾，沒有影片檔");
+  assert.ok(!fs.existsSync(dl) || !fs.readdirSync(dl).length, "下載資料夾沒動");
+  assert.ok((await s.req("GET", "/api/library")).json.links.some((x) => x.id === imp.project), "列在 YouTube 連結");
+
+  // 需要本機影片的都擋下；字幕、說明欄、Ask AI 這類照常
+  assert.equal((await s.req("GET", `/api/projects/${imp.project}/video?t=tok`, { headers: { "Sec-Fetch-Dest": "video", "X-Studio-Token": "" } })).status, 404);
+  assert.equal((await s.req("GET", `/api/projects/${imp.project}/thumbs`)).status, 404);
+  for (const a of ["burn", "suggest", "youtube", "speakers", "subtitle-file"]) {   // 重新處理可以：改用 Soniox（#182）
+    const r = await s.req("POST", `/api/projects/${imp.project}/${a}`, { body: {} });
+    assert.equal(r.status, 409, a);
+    assert.match(r.json.error, /YouTube 連結/, a);
+  }
+  assert.equal((await s.req("POST", `/api/projects/${imp.project}/shorts/suggest`, { body: {} })).status, 409);
+  assert.equal((await s.req("GET", `/api/projects/${imp.project}/ask`)).status, 200);
+
+  // 同一支再貼：直接打開，不重抓字幕
+  const again = await waitImport((await s.req("POST", "/api/import", { body: { url: `https://www.youtube.com/watch?v=${YID}`, mode: "link" } })).json.import);
+  assert.equal(again.reopened, true);
+  assert.equal(seen.captions.length, 1);
+
+  // 作者不允許嵌入：清楚的訊息，不留資料夾（沒有作者字幕的見下一個測試，#182）
+  subs = { en: [] };
+  embeddable = false;
+  const blocked = await waitImport((await s.req("POST", "/api/import", { body: { url: "https://youtu.be/abcdefghijk", mode: "link", lang: "en" } })).json.import);
+  assert.equal(blocked.status, "failed");
+  assert.match(blocked.error, /不允許在別的網站播放/);
+  assert.equal(fs.readdirSync(links).filter((n) => !n.startsWith(".")).length, 1, "失敗的不留資料夾");
+});
+
+test("the player adapter drives the YouTube embed through postMessage and looks like a video element to the page (#181)", async () => {
+  const vm = await import("node:vm");
+  const sent = [];
+  const handlers = {};
+  const el = { hidden: false, attrs: {}, paused: true, currentTime: 0, getAttribute(k) { return this.attrs[k] ?? null; }, removeAttribute(k) { delete this.attrs[k]; }, set src(v) { this.attrs.src = v; }, load() {}, pause() {}, play() { return Promise.resolve(); }, addEventListener() {} };
+  const frame = { hidden: true, attrs: {}, contentWindow: { postMessage: (m, o) => sent.push([JSON.parse(m), o]) }, getAttribute(k) { return this.attrs[k] ?? null; }, removeAttribute(k) { delete this.attrs[k]; }, set src(v) { this.attrs.src = v; }, addEventListener(t, f) { handlers[t] = f; } };
+  let now = 1000;
+  const timers = [];
+  const ctx = vm.createContext({ window: { addEventListener() {} }, location: { origin: "http://127.0.0.1:8766" }, performance: { now: () => now }, URLSearchParams, console,
+    setTimeout: (f) => { timers.push(f); return timers.length; }, clearTimeout: (k) => { if (k) timers[k - 1] = null; } });
+  new vm.Script(fs.readFileSync(new URL("../web/studio/player.js", import.meta.url), "utf8")).runInContext(ctx);
+  const v = vm.runInContext("makePlayer", ctx)(el, frame);
+  const events = [];
+  for (const e of ["play", "pause", "seeked", "timeupdate", "loadedmetadata"]) v.addEventListener(e, () => events.push(e));
+  v.useYouTube("l_xDqUm0MDQ", 1599000);
+  assert.equal(v.mode, "yt");
+  assert.equal(el.hidden, true);
+  assert.equal(frame.hidden, false);
+  const src = new URL(frame.attrs.src);
+  assert.equal(src.origin + src.pathname, "https://www.youtube-nocookie.com/embed/l_xDqUm0MDQ");
+  assert.equal(src.searchParams.get("enablejsapi"), "1");
+  assert.equal(src.searchParams.get("origin"), "http://127.0.0.1:8766");
+  assert.equal(v.duration, 1599, "準備好之前先用專案的片長");
+  handlers.load();
+  assert.deepEqual(sent.shift(), [{ event: "listening", id: 1, channel: "widget" }, "https://www.youtube-nocookie.com"], "載入後先說在聽");
+  timers.filter(Boolean).pop()();
+  assert.deepEqual(sent.shift()[0], { event: "listening", id: 1, channel: "widget" }, "還沒 onReady：再說一次（#182）");
+  v.currentTime = 123;   // 還沒準備好：先排隊
+  assert.equal(sent.length, 0);
+  v.handleMessage(JSON.stringify({ event: "onReady" }));
+  assert.deepEqual(sent.map(([m]) => [m.func, m.args]), [["seekTo", [123, true]]], "準備好才送排隊的指令");
+  assert.equal(timers.filter(Boolean).length, 0, "onReady 後不再重送");
+  v.handleMessage({ event: "onReady" });
+  assert.equal(sent.length, 1, "重複的 onReady 不再送一次排隊的指令");
+  sent.length = 0;
+  v.play();
+  assert.equal(v.paused, false);
+  assert.deepEqual(sent.map(([m]) => m.func), ["playVideo"]);
+  v.handleMessage({ event: "infoDelivery", info: { currentTime: 125, playerState: 1, playbackRate: 1 } });
+  now += 500;
+  assert.ok(Math.abs(v.currentTime - 125.5) < 1e-9, "播放中用經過的時間補");
+  v.pause();
+  assert.equal(v.paused, true);
+  assert.ok(Math.abs(v.currentTime - 125.5) < 1e-9, "暫停在當下的時間");
+  v.playbackRate = 1.25;
+  assert.deepEqual(sent.map(([m]) => m.func), ["playVideo", "pauseVideo", "setPlaybackRate"]);
+  v.handleMessage({ event: "onError", info: 150 });
+  assert.equal(v.ytError, 150);
+  assert.deepEqual(events, ["seeked", "loadedmetadata", "play", "timeupdate", "pause"]);
+  v.useFile("/api/projects/x/video?t=tok");
+  assert.equal(v.mode, "file");
+  assert.equal(frame.attrs.src, undefined, "換回本機影片就拿掉嵌入框");
+  assert.equal(el.attrs.src, "/api/projects/x/video?t=tok");
+});
+
+// ---- YouTube 連結沒有作者字幕（#182）：預設只抓音檔用 Soniox，或用原語言的自動字幕 ----
+test("a link without uploader captions: audio-only Soniox by default (audio gone after), auto captions on request, and reprocess switches to Soniox", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rt-link2-"));
+  const links = path.join(dir, "YouTube 連結");
+  const seen = { audio: [], auto: [], cached: false };
+  let auto = { "zh-Hant-orig": [] }, infoLang = "zh-Hant";
+  const s = await startStudio(t, { dir, deps: {
+    hasYtDlp: () => true,
+    downloadDir: () => path.join(dir, "YouTube 下載"),
+    linkDir: () => links,
+    async fetchInfo(id) { return pickInfo({ id, title: `T ${id}`, language: infoLang, duration: 2506, webpage_url: `https://www.youtube.com/watch?v=${id}`, subtitles: {}, automatic_captions: auto }); },
+    async fetchVideo() { throw new Error("只連結不該下載影片"); },
+    async fetchCaptions() { throw new Error("沒有作者字幕"); },
+    async fetchAudio(id, work) { const f = path.join(work, "audio.m4a"); fs.writeFileSync(f, "a"); seen.audio.push({ id, f }); return f; },
+    asrCached: () => seen.cached,
+    async fetchAutoCaptions(id, track, d) { seen.auto.push([id, track]); const f = path.join(d, `auto-captions.${track}.json3`); fs.writeFileSync(f, JSON.stringify({ events: [{ tStartMs: 0, dDurationMs: 1500, segs: [{ utf8: "自動" }] }, { tStartMs: 1500, dDurationMs: 1000, segs: [{ utf8: "字幕" }] }] })); return f; },
+    async prepareFromCaptions(o, { cues }) { return { cues, applied: [], rejected: [], description: "", chapters: [], suggest: null, timing: null, report: {} }; },
+    taiwanConverter: async () => (x) => x,
+  } });
+  const waitImport = async (key) => { for (let i = 0; i < 200; i++) { const r = (await s.req("GET", `/api/import/${key}`)).json; if (r.status !== "running") return r; await new Promise((x) => setTimeout(x, 20)); } throw new Error("import timed out"); };
+
+  // 預設：只抓音檔用 Soniox，辨識結果用影片 id 當快取鍵；音檔隨工作資料夾刪掉
+  const a = await waitImport((await s.req("POST", "/api/import", { body: { url: "https://youtu.be/qeFmbs9XaVg", mode: "link" } })).json.import);
+  assert.equal(a.status, "done", a.error);
+  assert.equal(a.captions, "soniox");
+  const pa = await s.waitFor(a.project, (x) => x.status === "ready" && !x.job);
+  assert.equal(pa.source.captions, "soniox");
+  assert.equal(pa.source.captions_file, undefined);
+  assert.equal(seen.audio.length, 1);
+  assert.equal(s.calls.prepareOpts.video, seen.audio[0].f, "辨識的是抓下來的音檔");
+  assert.equal(s.calls.prepareOpts.cacheId, "youtube:qeFmbs9XaVg");
+  assert.ok(!fs.existsSync(seen.audio[0].f), "音檔辨識完就刪掉");
+  assert.deepEqual(fs.readdirSync(pa.folder).filter((n) => /\.(m4a|mp4|webm|opus)$/.test(n)), [], "專案資料夾裡沒有影音檔");
+
+  // 重新處理：辨識結果還在（快取命中）就不再抓音檔
+  seen.cached = true;
+  assert.equal((await s.req("POST", `/api/projects/${a.project}/reprocess`, { body: {} })).status, 200);
+  await s.waitFor(a.project, (x) => x.status === "ready" && !x.job);
+  assert.equal(seen.audio.length, 1, "快取命中：沒有再抓音檔");
+  seen.cached = false;
+
+  // 選自動字幕：只用原語言那一軌，整理成 VTT
+  const b = await waitImport((await s.req("POST", "/api/import", { body: { url: "https://youtu.be/abcdefghijk", mode: "link", captions: "auto" } })).json.import);
+  assert.equal(b.status, "done", b.error);
+  assert.deepEqual(seen.auto, [["abcdefghijk", "zh-Hant-orig"]]);
+  const pb = await s.waitFor(b.project, (x) => x.status === "ready" && !x.job);
+  assert.equal(pb.source.captions, "auto");
+  assert.equal(pb.source.captions_file, "captions.auto.vtt");
+  assert.deepEqual(pb.cues.map((c) => c.text), ["自動", "字幕"]);
+  assert.ok(!fs.readdirSync(pb.folder).some((n) => n.endsWith(".json3")), "json3 整理完就刪");
+  assert.equal(seen.audio.length, 1, "用自動字幕不抓音檔");
+
+  // 自動字幕的專案「重新處理」＝改用 Soniox（只抓音檔）
+  assert.equal((await s.req("POST", `/api/projects/${b.project}/reprocess`, { body: {} })).status, 200);
+  const pb2 = await s.waitFor(b.project, (x) => x.status === "ready" && !x.job);
+  assert.equal(pb2.source.captions, "soniox");
+  assert.equal(pb2.source.captions_file, undefined);
+  assert.equal(seen.audio.length, 2);
+  assert.equal(seen.audio[1].id, "abcdefghijk");
+
+  // 沒有字幕、YouTube 也沒標語言、使用者沒選：不猜成英文，請使用者選；選了中文就照常
+  const lang0 = { ...auto };
+  auto = {};
+  infoLang = "";
+  const g = await waitImport((await s.req("POST", "/api/import", { body: { url: "https://youtu.be/zzzzzzzzzzz", mode: "link" } })).json.import);
+  assert.equal(g.status, "failed");
+  assert.match(g.error, /看不出這支影片說的是哪種語言/);
+  const g2 = await waitImport((await s.req("POST", "/api/import", { body: { url: "https://youtu.be/zzzzzzzzzzz", mode: "link", lang: "zh" } })).json.import);
+  assert.equal(g2.status, "done", g2.error);
+  assert.equal((await s.waitFor(g2.project, (x) => x.status === "ready" && !x.job)).foreign, false, "選中文就不是外語片");
+  auto = lang0;
+  infoLang = "zh-Hant";
+
+  // 沒有原語言的自動字幕還選自動字幕：清楚的訊息，不偷偷改成付費的 Soniox
+  auto = { "en-orig": [] };
+  const c = await waitImport((await s.req("POST", "/api/import", { body: { url: "https://youtu.be/l_xDqUm0MDQ", mode: "link", captions: "auto" } })).json.import);
+  assert.equal(c.status, "failed");
+  assert.match(c.error, /沒有原語言的自動字幕/);
+  assert.equal(seen.audio.length, 3, "只有選了中文那支抓了音檔");
+});
+
+// #186：清單檔壞掉時不當成第一次用而重建覆寫；改清單前先留一份 .broken
+test("a damaged library file is shown as empty without being rebuilt, and is backed up before the next change", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rt-libbad-"));
+  const picked = path.join(dir, "Picked");
+  fs.mkdirSync(picked);
+  const s = await startStudio(t, { dir, deps: { videoDirs: () => [dir], pickFolder: async () => picked } });
+  const file = path.join(dir, "state", "library.json");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, "{ 壞掉了");
+  const v = (await s.req("GET", "/api/library")).json;
+  assert.equal(v.broken, true);
+  assert.deepEqual([v.folders, v.files], [[], []], "先當空的");
+  assert.equal(fs.readFileSync(file, "utf8"), "{ 壞掉了", "沒有重建覆寫");
+  const r = await s.req("POST", "/api/library/add", { body: { kind: "folder" } });
+  assert.equal(r.status, 200, r.raw);
+  assert.equal(fs.readFileSync(`${file}.broken`, "utf8"), "{ 壞掉了", "改之前留了一份");
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")).folders, [picked]);
+  assert.equal(r.json.broken, false);
+  // 清單檔讀不到（沒有讀取權限）：備份不了就不改，回 500，原檔留著（#186）
+  fs.rmSync(`${file}.broken`);
+  fs.writeFileSync(file, "{ 讀不到的原檔");
+  fs.chmodSync(file, 0o000);
+  t.after(() => { try { fs.chmodSync(file, 0o600); } catch { /* 已經刪了 */ } });
+  const locked = await s.req("POST", "/api/library/add", { body: { kind: "folder" } });
+  assert.equal(locked.status, 500, locked.raw);
+  assert.match(locked.json.error, /沒辦法先備份/);
+  fs.chmodSync(file, 0o600);
+  assert.equal(fs.readFileSync(file, "utf8"), "{ 讀不到的原檔", "沒有被覆寫");
+  assert.ok(!fs.existsSync(`${file}.broken`));
+});
+
+// #185 的測試缺口（#186）：連結專案抓了音檔後辨識失敗或按停止，工作資料夾和音檔都要清掉
+test("a link project's audio and work folder are removed when recognition fails or is stopped", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rt-linkclean-"));
+  const audio = [];
+  let mode = "fail", entered = () => {};
+  const s = await startStudio(t, { dir, deps: {
+    hasYtDlp: () => true,
+    downloadDir: () => path.join(dir, "YouTube 下載"),
+    linkDir: () => path.join(dir, "YouTube 連結"),
+    async fetchInfo(id) { return pickInfo({ id, title: `T ${id}`, language: "zh-Hant", duration: 60, webpage_url: `https://www.youtube.com/watch?v=${id}`, subtitles: {}, automatic_captions: {} }); },
+    async fetchVideo() { throw new Error("只連結不該下載影片"); },
+    async fetchAudio(id, work) { const f = path.join(work, "audio.m4a"); fs.writeFileSync(f, "a"); audio.push(f); return f; },
+    asrCached: () => false,
+    async prepareSubtitles(o, { signal }) {
+      assert.ok(fs.existsSync(o.video), "辨識時音檔還在");
+      if (mode === "fail") throw new Error("no speech recognised");
+      entered();
+      await new Promise((_, reject) => signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
+    },
+  } });
+  const waitImport = async (key) => { for (let i = 0; i < 200; i++) { const r = (await s.req("GET", `/api/import/${key}`)).json; if (r.status !== "running") return r; await new Promise((x) => setTimeout(x, 20)); } throw new Error("import timed out"); };
+  const leftovers = (folder) => fs.readdirSync(folder).filter((n) => n.startsWith(".work-") || /\.(m4a|webm|opus)$/.test(n));
+  // 直接看磁碟上的 project.json：GET 專案時會順手清掉中斷留下的暫存（recover），用 API 等狀態就看不出處理流程自己有沒有清
+  const folder = () => { const base = path.join(dir, "YouTube 連結"); return path.join(base, fs.readdirSync(base).find((n) => n.endsWith("-字幕"))); };
+  const onDisk = async (pred) => {
+    for (let i = 0; i < 250; i++) {
+      try { const p = JSON.parse(fs.readFileSync(path.join(folder(), "project.json"), "utf8")); if (pred(p)) return p; } catch { /* 還沒建好 */ }
+      await new Promise((x) => setTimeout(x, 20));
+    }
+    throw new Error("timed out");
+  };
+
+  const a = await waitImport((await s.req("POST", "/api/import", { body: { url: "https://youtu.be/qeFmbs9XaVg", mode: "link" } })).json.import);
+  assert.equal(a.status, "done", a.error);
+  await onDisk((x) => x.status === "failed");
+  assert.equal(audio.length, 1);
+  assert.ok(!fs.existsSync(audio[0]), "失敗：音檔刪掉");
+  assert.deepEqual(leftovers(folder()), [], "失敗：沒有留下工作資料夾");
+
+  mode = "stop";
+  const started = new Promise((r) => { entered = r; });
+  assert.equal((await s.req("POST", `/api/projects/${a.project}/retry`, { body: {} })).status, 200);
+  await started;
+  assert.equal((await s.req("POST", `/api/projects/${a.project}/cancel`)).status, 200);
+  await onDisk((x) => x.status === "cancelled");
+  assert.equal(audio.length, 2, "重試又抓了一次（沒有快取）");
+  assert.ok(!fs.existsSync(audio[1]), "停止：音檔刪掉");
+  assert.deepEqual(leftovers(folder()), [], "停止：沒有留下工作資料夾");
+});
+
+// ---- 影片庫（#184）：加入的資料夾掃成樹、單獨的影片、連結專案、其他專案 ----
+test("the library seeds the old home folders, lists trees with project marks, and adds or removes folders and files picked in Finder", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rt-library-"));
+  const movies = path.join(dir, "Movies"), desk = path.join(dir, "Desktop"), other = path.join(dir, "Other");
+  for (const d of [movies, path.join(movies, "課程"), desk, other]) fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(movies, "課程", "第一堂.mp4"), "x");
+  fs.writeFileSync(path.join(desk, "錄影.mov"), "x");
+  fs.writeFileSync(path.join(other, "單支.mp4"), "x");
+  let pickedFolder = "", pickedFile = "";
+  const s = await startStudio(t, { dir, deps: { videoDirs: () => [movies, path.join(movies, "課程"), desk, path.join(dir, "沒有這個")], pickFolder: async () => pickedFolder, pickFile: async () => pickedFile } });
+  assert.equal((await s.req("GET", "/api/library", { headers: { "X-Studio-Token": "wrong" } })).status, 403, "要 token");
+  const first = (await s.req("GET", "/api/library")).json;
+  assert.deepEqual(first.folders.map((f) => f.path), [movies, desk].map((x) => path.resolve(x)), "第一次：放入舊首頁會掃的資料夾（不存在的、已經在別的資料夾裡的不放）");
+  const course = first.folders[0].dirs.find((x) => x.name === "課程");
+  assert.deepEqual(course.videos.map((v) => [v.name, v.project]), [["第一堂.mp4", null]]);
+  assert.equal(fs.statSync(path.join(dir, "state", "library.json")).mode & 0o777, 0o600);
+
+  // 做過字幕的影片標出專案，點了可以打開
+  const { id } = (await s.req("POST", "/api/open", { body: { video: path.join(movies, "課程", "第一堂.mp4"), privacy: "public" } })).json;
+  await s.waitFor(id, (x) => x.status === "ready");
+  const marked = (await s.req("GET", "/api/library")).json.folders[0].dirs.find((x) => x.name === "課程").videos[0];
+  assert.deepEqual(marked.project, { id, status: "ready" });
+
+  // 影片沒列在樹上的專案放進「其他專案」：影片庫外面的、太深沒掃到的；樹上有的不重複列
+  const outside = path.join(dir, "外面", "外面.mp4"), deep = path.join(movies, "一", "二", "三", "四", "深.mp4");
+  for (const f of [outside, deep]) { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, "x"); }
+  for (const v of [outside, deep]) { const r = (await s.req("POST", "/api/open", { body: { video: v, privacy: "public" } })).json; await s.waitFor(r.id, (x) => x.status === "ready"); }
+  const grouped = (await s.req("GET", "/api/library")).json;
+  assert.deepEqual(grouped.others.map((x) => x.name).sort(), ["外面", "深"].sort());
+  assert.deepEqual(grouped.links, []);
+
+  // 加資料夾、加單支影片（Finder 選的）；取消就不動
+  pickedFolder = "";
+  assert.deepEqual((await s.req("POST", "/api/library/add", { body: { kind: "folder" } })).json, { cancelled: true });
+  pickedFolder = other;
+  const added = (await s.req("POST", "/api/library/add", { body: { kind: "folder" } })).json;
+  assert.equal(added.added, path.resolve(other));
+  assert.equal(added.folders.length, 3);
+  pickedFile = path.join(other, "單支.mp4");
+  const withFile = (await s.req("POST", "/api/library/add", { body: { kind: "file" } })).json;
+  assert.deepEqual(withFile.files.map((f) => [f.name, f.missing]), [["單支.mp4", false]]);
+  assert.equal((await s.req("POST", "/api/library/add", { body: { kind: "file" } })).json.files.length, 1, "同一支不重複");
+
+  // 移除：只收清單裡有的路徑
+  assert.equal((await s.req("POST", "/api/library/remove", { body: { path: "/etc" } })).status, 404);
+  const removed = (await s.req("POST", "/api/library/remove", { body: { path: path.resolve(desk) } })).json;
+  assert.deepEqual(removed.folders.map((f) => f.path), [movies, other].map((x) => path.resolve(x)));
+  assert.equal((await s.req("GET", "/api/library")).json.folders.length, 2, "記住了");
+  assert.equal((await s.req("PUT", "/api/library", { body: {} })).status, 405);
+});
+
+// 影片庫左欄（#184）：頁面怎麼畫那棵樹、點了開什麼
+test("the library pane draws folders as a foldable tree, opens projects or previews, filters by search, and remembers folds", async () => {
+  const vm = await import("node:vm");
+  const { doc, stub, $ } = fakePage();
+  const store = new Map([["studio.libFold", JSON.stringify({ "/M/課程": true, "g:links": false })]]);
+  const calls = [];
+  const view = {
+    links: [{ id: "1111111111111111", name: "YT 講座", status: "ready", link: true, duration_ms: 65000 }],
+    folders: [
+      { path: "/M", name: "Movies", truncated: false, missing: false, videos: [{ path: "/M/a.mp4", name: "a.mp4", size: 2e6, offline: true, project: null }],
+        dirs: [{ path: "/M/課程", name: "課程", videos: [{ path: "/M/課程/第一堂.mp4", name: "第一堂.mp4", size: 3e6, project: { id: "2222222222222222", status: "ready" } }], dirs: [] },
+          { path: "/M/舊", name: "舊", videos: [{ path: "/M/舊/b.mp4", name: "b.mp4", size: 1e6, project: null }], dirs: [] }] },
+      { path: "/Gone", name: "Gone", missing: true, videos: [], dirs: [] },
+    ],
+    files: [{ path: "/D/單支.mp4", name: "單支.mp4", size: 1e6, project: null, missing: false }],
+    others: [{ id: "3333333333333333", name: "外面", status: "failed", link: false, duration_ms: 0 }],
+  };
+  const replies = { "POST /api/library/add": { ...view, files: [...view.files, { path: "/D/新.mp4", name: "新.mp4", size: 1, project: null, missing: false }], added: "/D/新.mp4" } };
+  const fetch = async (url, opts = {}) => {
+    const key = `${opts.method || "GET"} ${url}`;
+    calls.push({ key, body: opts.body ? JSON.parse(opts.body) : null });
+    if (!replies[key]) return new Promise(() => {});
+    return { ok: true, status: 200, json: async () => replies[key] };
+  };
+  const ctx = vm.createContext({ document: doc, location: { hash: "" }, history: stub, fetch, setTimeout: () => 0, clearTimeout() {},
+    setInterval: () => 0, clearInterval() {}, requestAnimationFrame: () => 0, cancelAnimationFrame() {}, AbortController, URL, URLSearchParams, TextEncoder,
+    console, ResizeObserver: stub, Image: stub, navigator: stub, matchMedia: stub, getComputedStyle: stub,
+    localStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) },
+    ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs"), chapterOps: await import("../lib/chapters.mjs"), layoutOps: await import("../lib/studio-layout.mjs"), askOps: await import("../lib/ask-ai.mjs"), notesOps: await import("../lib/study-notes.mjs") });
+  ctx.window = ctx;
+  ctx.addEventListener = () => {};
+  $("#shell").style = { setProperty() {}, removeProperty() {}, getPropertyValue: () => "" };
+  for (const x of pageScripts().slice(1)) new vm.Script(fs.readFileSync(new URL(`../web${x.src}`, import.meta.url), "utf8"), { filename: x.src }).runInContext(ctx);
+  const run = (code) => vm.runInContext(code, ctx);
+  assert.ok(calls.some((c) => c.key === "GET /api/library"), "一進來就讀影片庫");
+
+  run(`lib.view = ${JSON.stringify(view)}; drawLib();`);
+  let html = $("#libTree").innerHTML;
+  const at = (s) => html.indexOf(s);
+  assert.ok(at("YouTube 連結") >= 0 && at("YouTube 連結") < at('data-fold="root:/M"') && at('data-fold="root:/M"') < at("單獨加入的影片") && at("單獨加入的影片") < at("其他專案"), "連結、資料夾、單獨的檔案、其他專案");
+  assert.match(html, /data-fold="root:\/M" open>/, "加入的資料夾預設打開；鍵和子資料夾分開，同一個資料夾兩處出現不會共用");
+  assert.match(html, /data-fold="\/M\/舊">/, "子資料夾預設收著");
+  assert.match(html, /data-fold="\/M\/課程" open>/, "記住打開過的子資料夾");
+  assert.match(html, /data-fold="g:links">/, "記住收起來的群組");
+  assert.match(html, /data-video="\/M\/a\.mp4"/, "還沒做字幕的：開預覽");
+  assert.match(html, /在 iCloud/);
+  assert.match(html, /data-open="2222222222222222"[^>]*>.*?有字幕/, "做過字幕的：開專案");
+  assert.match(html, /data-manage="2222222222222222"/, "有專案才有「整理…」");
+  assert.deepEqual([...html.matchAll(/data-manage="([^"]+)"/g)].map((m) => m[1]), ["1111111111111111", "2222222222222222", "3333333333333333"], "還沒做字幕的影片沒有「整理…」");
+  for (const p of ["/M", "/Gone", "/D/單支.mp4"]) assert.match(html, new RegExp(`data-remove="${p.replace(/[./]/g, "\\$&")}"`), `可以從影片庫移除 ${p}`);
+  assert.match(html, /找不到這個資料夾/);
+  assert.match(html, /<span class="g-count">3<\/span>/, "資料夾旁邊是裡面（含子資料夾）的影片數");
+  assert.equal($("#libEmpty").hidden, true);
+
+  // 收合記錄只記和預設不一樣的：畫出來時帶 open 觸發的 toggle 不記
+  const details = (fold, open, group) => ({ matches: () => true, dataset: { fold }, open, classList: { contains: (c) => c === "lib-group" && group } });
+  $("#libTree").on.toggle({ target: details("root:/M", true, true) });
+  $("#libTree").on.toggle({ target: details("/M/舊", true, false) });
+  $("#libTree").on.toggle({ target: details("g:links", true, true) });
+  assert.deepEqual(JSON.parse(store.get("studio.libFold")), { "/M/課程": true, "/M/舊": true });
+
+  // 搜尋：只留找得到的，所在的資料夾全部打開；搜尋時點開收起不記
+  $("#libFind").value = "第一";
+  run(`drawLib()`);
+  html = $("#libTree").innerHTML;
+  assert.match(html, /第一堂\.mp4/);
+  assert.match(html, /data-fold="\/M\/課程" open>/);
+  for (const gone of ["a.mp4", "b.mp4", "YT 講座", "單支", "外面", "Gone"]) assert.equal(html.includes(gone), false, gone);
+  $("#libFind").value = "沒有這種";
+  run(`drawLib()`);
+  assert.equal($("#libTree").innerHTML, "");
+  assert.equal($("#libEmpty").hidden, false);
+  assert.match($("#libEmpty").textContent, /找不到符合/);
+  $("#libFind").value = "";
+
+  // 加一支影片檔：記進影片庫，還沒做字幕就開預覽
+  await run(`addToLib("file")`);
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(calls.find((c) => c.key === "POST /api/library/add").body, { kind: "file" });
+  assert.match($("#libTree").innerHTML, /data-video="\/D\/新\.mp4"/);
+  assert.deepEqual(calls.find((c) => c.key === "POST /api/preview")?.body, { video: "/D/新.mp4" });
+});
+
+// #186：網址匯入完成時對話框已經關了（去編輯別支），不把人拉走；從粗剪點專案會停掉預覽；回到編輯頁不整份重掃影片庫
+test("an import finishing in the background does not take over, leaving the preview stops it, and reopening the editor does not rescan the library", async () => {
+  const vm = await import("node:vm");
+  const { doc, stub, $ } = fakePage();
+  const calls = [];
+  const libView = { links: [{ id: "aaaaaaaaaaaaaaaa", name: "背景匯入", status: "processing", link: true, duration_ms: 0 }], folders: [], files: [], others: [], broken: false };
+  const replies = {
+    "GET /api/import/k1": { status: "done", project: "aaaaaaaaaaaaaaaa", title: "背景匯入", captions: "author" },
+    "GET /api/import/k2": { status: "done", project: "bbbbbbbbbbbbbbbb", title: "等著的", captions: "author" },
+    "GET /api/library": libView,
+  };
+  const bodies = [];
+  replies["POST /api/open"] = { id: "cccccccccccccccc" };
+  const fetch = async (url, opts = {}) => {
+    const key = `${opts.method || "GET"} ${url}`;
+    calls.push(key);
+    if (opts.body) bodies.push({ key, body: JSON.parse(opts.body) });
+    if (key.startsWith("GET /api/projects/")) return { ok: false, status: 404, json: async () => ({ error: "找不到這個專案" }) };   // 打開專案只記下來
+    if (!replies[key]) return new Promise(() => {});
+    return { ok: true, status: 200, json: async () => replies[key] };
+  };
+  const store = new Map();
+  const ctx = vm.createContext({ document: doc, location: { hash: "", pathname: "/" }, history: stub, fetch, setTimeout: () => 0, clearTimeout() {},
+    setInterval: () => 0, clearInterval() {}, requestAnimationFrame: () => 0, cancelAnimationFrame() {}, AbortController, URL, URLSearchParams, TextEncoder,
+    console, ResizeObserver: stub, Image: stub, navigator: stub, matchMedia: stub, getComputedStyle: stub,
+    localStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) },
+    ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs"), chapterOps: await import("../lib/chapters.mjs"), layoutOps: await import("../lib/studio-layout.mjs"), askOps: await import("../lib/ask-ai.mjs"), notesOps: await import("../lib/study-notes.mjs") });
+  ctx.window = ctx;
+  ctx.addEventListener = () => {};
+  $("#shell").style = { setProperty() {}, removeProperty() {}, getPropertyValue: () => "" };
+  let unloaded = 0;
+  Object.assign($("#pvideo"), { pause() {}, load() {}, getAttribute: () => "/api/preview/p1/video", removeAttribute: () => { unloaded += 1; } });
+  for (const x of pageScripts().slice(1)) new vm.Script(fs.readFileSync(new URL(`../web${x.src}`, import.meta.url), "utf8"), { filename: x.src }).runInContext(ctx);
+  await new Promise((r) => setImmediate(r));
+  const run = (code) => vm.runInContext(code, ctx);
+  const n = (k) => calls.filter((c) => c === k).length;
+
+  // 對話框已經關了：不自動打開，只提示（附「打開」）
+  $("#addUrlDlg").open = false;
+  await run(`importKey = "k1"; pollImport()`);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(n("GET /api/projects/aaaaaaaaaaaaaaaa"), 0, "不把人拉走");
+  assert.match($("#toast").innerHTML, /背景匯入.*匯入好了/);
+  // 對話框還開著（在等它）：照舊直接打開
+  $("#addUrlDlg").open = true;
+  await run(`importKey = "k2"; pollImport()`);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(n("GET /api/projects/bbbbbbbbbbbbbbbb"), 1, "在等的就直接打開");
+
+  // 預覽粗剪中換到別的畫面（例如點了左欄的專案）：縮圖串流中止、預覽影片卸下
+  run(`trim.ac = new AbortController(); trim.info = { video: "/M/a.mp4", id: "p1" };`);
+  const tac = run("trim.ac"), unloadedBefore = unloaded;
+  run(`setView("editor")`);
+  assert.equal(tac.signal.aborted, true, "縮圖串流停掉");
+  assert.equal(unloaded, unloadedBefore + 1, "預覽影片卸下");
+  assert.equal(run("trim.info"), null);
+  // 「開始上字幕」：送出前先讀好影片路徑，之後離開粗剪、換到處理中或空狀態都不會再讀被清掉的 trim.info（#188 review）
+  run(`trim.ac = new AbortController(); trim.info = { video: "/M/b.mp4", id: "p2", duration_ms: 60000 }; trim.cuts = []; home.sub.mode = "none";`);   // 不要字幕：不碰分軌的假 DOM
+  await run(`$("#startBtn").onclick()`);
+  for (let i = 0; i < 3; i++) await new Promise((r) => setImmediate(r));
+  assert.equal(bodies.find((b) => b.key === "POST /api/open")?.body.video, "/M/b.mp4");
+  assert.ok(calls.includes("GET /api/projects/cccccccccccccccc"), "接著打開新專案");
+  assert.equal(run("trim.info"), null, "離開粗剪");
+  assert.doesNotThrow(() => { run(`setView("processing"); setView("empty"); setView("processing")`); }, "trim.info 已清掉，換畫面不會出錯");
+
+  // 回到編輯頁：影片庫讀過就不再整份重掃，只把這支的狀態改掉
+  run(`lib.view = ${JSON.stringify(libView)}; drawLib(); state.id = "aaaaaaaaaaaaaaaa"; state.p = { status: "ready" };`);
+  const before = n("GET /api/library");
+  run(`enterLayout()`);
+  assert.equal(n("GET /api/library"), before, "不重掃");
+  assert.equal(run("lib.view.links[0].status"), "ready", "清單上這支改成有字幕");
+  assert.doesNotMatch($("#libTree").innerHTML, /處理中/);
+});
+
+// 版面結構（#184）：搬 HTML 時曾把編輯頁的右欄搬到外框外面，假 DOM 測不出來，這裡直接看標籤巢狀
+test("page structure: the views sit in the shell's main column and the editor keeps its own panes", () => {
+  const html = fs.readFileSync(new URL("../web/studio.html", import.meta.url), "utf8").replace(/<!--[\s\S]*?-->/g, "");
+  const VOID = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"]);
+  const stack = [], parents = new Map();
+  for (const m of html.matchAll(/<(\/?)([a-zA-Z][\w-]*)([^>]*?)(\/?)>/g)) {
+    const [, close, tag, attrs, selfClose] = m;
+    if (VOID.has(tag.toLowerCase()) || selfClose) continue;
+    if (close) {
+      const top = stack.pop();
+      assert.equal(top?.tag, tag, `</${tag}> 對不上 <${top?.tag}${top?.id ? ` id="${top.id}"` : ""}>`);
+      continue;
+    }
+    const id = /\sid="([^"]+)"/.exec(attrs)?.[1] || "";
+    if (id) parents.set(id, stack.filter((x) => x.id).map((x) => x.id));
+    stack.push({ tag, id });
+  }
+  assert.deepEqual(stack, [], "每個標籤都有關");
+  for (const v of ["empty", "trim", "processing", "editor"]) assert.deepEqual(parents.get(v), ["shell", "views"], `#${v} 在外框的中間欄`);
+  for (const x of ["lib", "splitL", "views"]) assert.deepEqual(parents.get(x), ["shell"]);
+  for (const x of ["left", "splitR", "right"]) assert.deepEqual(parents.get(x), ["shell", "views", "editor"], `#${x} 在編輯頁裡`);
+  assert.deepEqual(parents.get("closed"), [], "關閉畫面在外框外面");
+});
+
+// 開機（#184）：網址沒帶專案就打開上次的專案；專案不見了默默回到空狀態，不跳錯誤
+test("startup reopens the last project quietly, and falls back to the empty view when it is gone", async () => {
+  const vm = await import("node:vm");
+  for (const gone of [false, true]) {
+    const { doc, stub, $ } = fakePage();
+    const store = new Map([["studio.lastProject", "abcdefabcdefabcd"]]);
+    const calls = [];
+    const fetch = async (url, opts = {}) => {
+      const key = `${opts.method || "GET"} ${url}`;
+      calls.push(key);
+      if (key === "GET /api/projects/abcdefabcdefabcd") return gone ? { ok: false, status: 404, json: async () => ({ error: "找不到這個專案" }) } : new Promise(() => {});
+      return new Promise(() => {});
+    };
+    const ctx = vm.createContext({ document: doc, location: { hash: "", pathname: "/" }, history: stub, fetch, setTimeout: () => 0, clearTimeout() {},
+      setInterval: () => 0, clearInterval() {}, requestAnimationFrame: () => 0, cancelAnimationFrame() {}, AbortController, URL, URLSearchParams, TextEncoder,
+      console, ResizeObserver: stub, Image: stub, navigator: stub, matchMedia: stub, getComputedStyle: stub,
+      localStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) },
+      ops, cutOps: await import("../lib/cuts.mjs"), shortOps: await import("../lib/shorts.mjs"), chapterOps: await import("../lib/chapters.mjs"), layoutOps: await import("../lib/studio-layout.mjs"), askOps: await import("../lib/ask-ai.mjs"), notesOps: await import("../lib/study-notes.mjs") });
+    ctx.window = ctx;
+    ctx.addEventListener = () => {};
+    $("#shell").style = { setProperty() {}, removeProperty() {}, getPropertyValue: () => "" };
+    $("#alert").hidden = true;
+    $("#empty").hidden = true;
+    for (const x of pageScripts().slice(1)) new vm.Script(fs.readFileSync(new URL(`../web${x.src}`, import.meta.url), "utf8"), { filename: x.src }).runInContext(ctx);
+    await new Promise((r) => setImmediate(r));
+    assert.ok(calls.includes("GET /api/projects/abcdefabcdefabcd"), "打開上次的專案");
+    assert.ok(calls.includes("GET /api/library"), "左欄照樣讀影片庫");
+    if (!gone) continue;
+    assert.equal($("#alert").hidden, true, "不見了不跳錯誤");
+    assert.equal($("#empty").hidden, false, "回到空狀態");
+    assert.equal(store.has("studio.lastProject"), false, "忘掉它，下次不再試");
+  }
+});
+
+test("the Extend tab never shrinks below its own content, so the Drive row stays underneath (#190)", () => {
+  // #extHost 設 min-height:0 會被壓得比 ExtPanel（內容框最矮 300px）還矮，內容溢出、被後面的 Drive 那一列蓋住
+  const css = fs.readFileSync(new URL("../web/studio.css", import.meta.url), "utf8");
+  const rule = css.match(/^#extHost\s*\{([^}]*)\}/m);
+  assert.ok(rule, "studio.css 有 #extHost 規則");
+  assert.doesNotMatch(rule[1], /min-height\s*:\s*0\b/);
 });

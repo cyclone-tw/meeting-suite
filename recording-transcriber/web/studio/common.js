@@ -12,7 +12,7 @@ const TOKEN = document.querySelector('meta[name="studio-token"]').content;
 // 伺服器設定好的選用功能（handoff、icloud），沒設定的按鈕不顯示
 const FEATURES = new Set((document.querySelector('meta[name="studio-features"]')?.content || "").split(/\s+/).filter(Boolean));
 const SIZE_PX = { small: 16, medium: 20, large: 24 };
-const STEP_ORDER = ["preview", "tracks", "fill", "extract", "asr", "proofread", "describe", "speakers"];
+const STEP_ORDER = ["preview", "tracks", "fill", "audio", "extract", "asr", "proofread", "describe", "speakers"];
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -59,22 +59,24 @@ function setStep(n) {
   }
 }
 
-let homePosters = null;   // 首頁縮圖的串流，離開首頁就中止
 let dlRun = 0;            // 等 iCloud 下載的輪次；換一輪或離開首頁，舊的等待就停（#20、#22）
+// 畫面（#184）：empty、trim、processing、editor 都在外框（左欄影片庫）裡；closed 是整頁
 function setView(v) {
-  for (const id of ["home", "trim", "processing", "editor", "closed"]) $(`#${id}`).hidden = id !== v;
-  $("#homeBtn").hidden = v === "home";
+  for (const id of ["empty", "trim", "processing", "editor", "closed"]) $(`#${id}`).hidden = id !== v;
+  $("#shell").hidden = v === "closed";
+  $("#libToggle").hidden = v === "closed";
   $("#burnOpen").hidden = v !== "editor";
   $("#ytOpen").hidden = v !== "editor";
   $("#wikiOpen").hidden = v !== "editor" || !FEATURES.has("handoff");
   if (v !== "editor") { $("#saveNote").textContent = ""; video.pause(); if (typeof leaveEditorTimeline === "function") leaveEditorTimeline(); }
-  if (v !== "trim") pvideo.pause();
-  if (v !== "home") {
-    homePosters?.abort();
+  // 離開預覽粗剪（從左欄點了專案之類）：縮圖串流、預覽影片一起停（trim.js）
+  if (v !== "trim") { if (typeof leaveTrim === "function") leaveTrim(); else pvideo.pause(); }
+  if (v !== "empty") {
     dlRun += 1;   // 改開了別的東西：不要等下載完又把畫面拉回預覽
     if ($("#toast").textContent.includes(_("正在下載到這台電腦"))) $("#toast").hidden = true;
   }
-  if (v === "home") { $("#projName").textContent = ""; $("#privBadge").hidden = true; }
+  if (v === "empty") { $("#projName").textContent = ""; $("#privBadge").hidden = true; }
+  if (typeof markLibNow === "function") markLibNow();   // 左欄標出現在開著的（layout.js）
 }
 
 const fmtClock = (ms) => {

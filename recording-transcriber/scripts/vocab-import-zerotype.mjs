@@ -14,7 +14,7 @@
 //   pnpm run vocab:import-zerotype --check --corpus <dir> [--corpus <dir>]
 import fs from "node:fs";
 import path from "node:path";
-import { userProfilePath } from "../lib/asr-profile.mjs";
+import { userProfilePath, vocabularySource } from "../lib/asr-profile.mjs";
 import {
   classifyZeroTypeCandidates,
   countVocabularyHits,
@@ -151,8 +151,9 @@ function main() {
   const zerotype = readJson(opts.zerotype, "ZeroType table");
   const profile = fs.existsSync(opts.profile) ? readJson(opts.profile, "ASR profile") : {};
   const policy = fs.existsSync(opts.policy) ? readJson(opts.policy, "import policy") : {};
-  const privatePaths = profile.private_vocabulary?.paths;
-  const privateVocabulary = loadPrivateVocabulary({ paths: Array.isArray(privatePaths) ? privatePaths : [] });
+  // 人名詞彙有設定卻沒讀到時不分類：不然人名的變體會被當成一般詞，寫進共用的錯字表
+  const privateVocabulary = loadPrivateVocabulary({ source: vocabularySource("private_vocabulary", profile), ttlMs: 0 });
+  if (!["absent", "loaded"].includes(privateVocabulary.state)) throw new Error("the private vocabulary note could not be read from the wiki just now; nothing classified or written");
   const pairs = zeroTypeToPairs(zerotype);
   const profileVocabulary = profile.vocabulary || {};
 

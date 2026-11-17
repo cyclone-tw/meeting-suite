@@ -165,21 +165,3 @@ export function forgetRecent(projectDir, env = process.env) {
   if (!fs.existsSync(dir)) return;
   writePrivate(path.join(dir, "recent.json"), JSON.stringify(loadRecent(env).filter((x) => x.dir !== projectDir), null, 1) + "\n");
 }
-
-// 常放錄影的資料夾裡最新的影片（OBS 預設存到「影片」）
-export function recentVideos(dirs, limit = 12) {
-  const out = [];
-  for (const d of dirs) {
-    let names = [];
-    try { names = fs.readdirSync(d); } catch { continue; }
-    for (const n of names) {
-      if (n.startsWith(".") || !VIDEO_EXTENSIONS.has(path.extname(n).toLowerCase()) || /-字幕\.mp4$/u.test(n)) continue;
-      const file = path.join(d, n);
-      try {
-        const st = fs.statSync(file);
-        if (st.isFile()) out.push({ path: file, name: n, size: st.size, mtime: st.mtimeMs });
-      } catch { /* 讀不到就略過 */ }
-    }
-  }
-  return out.sort((a, b) => b.mtime - a.mtime).slice(0, limit);
-}

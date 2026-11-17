@@ -5,20 +5,16 @@
     "Chat GBT": "ChatGPT"
   },
   "shared_vocabulary": {
-    "paths": [
-      "Documents/notes/transcription-vocabulary.md"
-    ],
-    "repo": "Documents/notes",
-    "wiki_path": "transcription-vocabulary.md"
+    "wiki_path": "Notes/transcription-vocabulary.md",
+    "agent": "Claude"
   },
   "private_vocabulary": {
-    "paths": [
-      "Documents/private-vocabulary.md"
-    ]
+    "wiki_path": "Notes/private-vocabulary.md"
   },
   "meeting_scribe_url": "https://scribe-host.example.ts.net:9443",
   "meeting_scribe_standby_url": "",
   "icloud_inbox": "Inbox",
+  "wiki_cli": "my-wiki",
   "remote_host": "studio-mac",
   "studio_drive": {
     "account_suffix": "@example.com",

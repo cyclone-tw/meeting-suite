@@ -21,27 +21,33 @@ import path from "node:path";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { burnSubtitles, prepareFromCaptions, prepareSubtitles, preflight, renderShort, runFfmpeg, subAdvances, SUBTITLE_SIZES, taiwanConverter, videoDurationMs, videoSize, writeBurnSubtitles } from "./subtitle-run.mjs";
+import { asrCached, burnSubtitles, prepareFromCaptions, prepareSubtitles, preflight, renderShort, runFfmpeg, subAdvances, SUBTITLE_SIZES, taiwanConverter, videoDurationMs, videoSize, writeBurnSubtitles } from "./subtitle-run.mjs";
 import { describeCraig, envelopeOf, findCraig, labelWith, loadCraig, loadNames, namesMap, noteSeen, rememberNames, removeRosterUser, resolveZip, rosterList, setRosterName, shownNames, speakersRecord } from "./speaker-tracks.mjs";
 import { fillArgs, missingVoices, voiceGain } from "../lib/speaker-tracks.mjs";
 import { LANG_MODES, langModeOf, styleOf, SUBTITLE_STYLES } from "../lib/subtitle-box.mjs";
-import { captionSource, fetchCaptions, fetchInfo, fetchVideo, parseVtt, youtubeId } from "../lib/youtube-source.mjs";
+import { autoOrigTrack, captionSource, fetchAudio, fetchAutoCaptions, fetchCaptions, fetchInfo, fetchVideo, parseVtt } from "../lib/youtube-source.mjs";
+import { cuesToVtt, json3Cues } from "../lib/auto-captions.mjs";
+import { SITE_LABEL, videoSource } from "../lib/video-source.mjs";
+import { addEntry, backupBroken, loadLibrary, removeEntry, saveLibrary, scanFolder } from "../lib/library.mjs";
 import { translateCues } from "../lib/subtitle-translate.mjs";
 import { measureAdvances } from "../lib/text-measure.mjs";
 import { keepSegments, remapCues, remapDescription } from "../lib/cuts.mjs";
-import { poster, thumbnails, waveform } from "../lib/media-preview.mjs";
+import { thumbnails, waveform } from "../lib/media-preview.mjs";
 import { detectBlack, detectSilence, mergeSuggestions, rangesToSuggestions, suggestFromTranscript } from "../lib/cut-suggest.mjs";
 import { inCloudFolder, realDir } from "./subtitle-cli.mjs";
 import { MAY_USE_CHINA_CLOUD_LLM, checkProofreader, PROOFREADERS, proofreaderAvailable } from "../lib/proofreaders.mjs";
 import { addCorrection, addCorrections, correctionsCacheFile, correctionsSummary, meetingScribeUrl, syncCorrections } from "../lib/corrections-sync.mjs";
-import { loadAsrProfile } from "../lib/asr-profile.mjs";
+import { loadAsrProfile, wikiCli } from "../lib/asr-profile.mjs";
+import { wikiBin } from "../lib/wiki-cli.mjs";
 import { copyToDriveIsolated, driveDisabled, driveWhere, recordingStamp } from "../lib/studio-drive.mjs";
 import { loadRecapFiles, localBuild } from "../lib/shared-components.mjs";
 import { loadPin, verifyShared } from "../lib/shared-pin.mjs";
 import { cleanMindmapReply, safeMindmapSvg, moduleKey, moduleLabel, recapTranscript, scribeDir, recapKey, recapParagraphs, requestModule, requestModules, requestRecap, resolveModuleOptions } from "../lib/meeting-recap.mjs";
 import { resolveSonioxKey } from "../lib/soniox-async.mjs";
 import { buildCues, cueOptsFor, toSrt } from "../lib/subtitle-text.mjs";
-import { describe, nameFixes, suggestShorts } from "../lib/subtitle-ai.mjs";
+import { askVideo, describe, nameFixes, suggestShorts } from "../lib/subtitle-ai.mjs";
+import { QUESTION_MAX, askSystemPrompt, askUserPrompt, cleanMessages, cleanSources, sourcesUsed, templateIds } from "../lib/ask-ai.mjs";
+import { FILE_MAX as NOTES_FILE_MAX, NOTE_MAX, NOTES_MAX, cleanNotes, formatNotes, parseNotes } from "../lib/study-notes.mjs";
 import { MAX_ITEMS as MAX_SHORTS, nextN, shortAss, shortCues, shortKeep, shortLayout, validateShorts } from "../lib/shorts.mjs";
 import { icloudRoot } from "../lib/paths.mjs";
 import { handoffEnabled, handoffFromStudio, handoffSubdir } from "../lib/wiki-handoff.mjs";
@@ -52,15 +58,17 @@ import {
 import { keychainSecrets, loadSettings, saveSettings, secretAccount } from "../lib/youtube-settings.mjs";
 import {
   BROWSER_PLAYABLE, VIDEO_EXTENSIONS, forgetRecent, icloudStudioDir, isForeign, isOffline, keepTranslations, loadRecent, markAiCues, parseSrt, projectDirFor, projectId,
-  readProject, recentVideos, rememberRecent, sourceVideo, stateDir, validateCues, validateCuts, validateDescription, writePrivate, writeProject,
+  readProject, rememberRecent, sourceVideo, stateDir, validateCues, validateCuts, validateDescription, writePrivate, writeProject,
 } from "../lib/studio-project.mjs";
 
 const TOOL_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PRIVACY = new Set(["public", "sensitive", "student-private"]);
 // 影片說的語言（#56）：zh 是一般的中文影片；其他語言會翻成中文、可以做雙語字幕
 const LANG = /^[a-z]{2,3}$/;
-// 從 YouTube 下載的影片放這裡（首頁的影片清單也會列這個資料夾）
+// 從 YouTube 下載的影片放這裡（在「影片」底下，影片庫的樹上看得到）
 export const youtubeDownloadDir = (home = os.homedir()) => path.join(home, "Movies", "YouTube 下載");
+// 只連結的專案（#181）另外放：和下載的同一支不會撞名（下載的專案資料夾也叫「<標題> [id]-字幕」）
+export const youtubeLinkDir = (home = os.homedir()) => path.join(home, "Movies", "YouTube 連結");
 const MAX_BODY = 8 * 1024 * 1024;
 
 process.env.PATH = [path.join(process.env.HOME || "", ".local", "bin"), "/opt/homebrew/bin", "/usr/local/bin", process.env.PATH || "/usr/bin:/bin"].join(":");
@@ -76,7 +84,8 @@ const escHtml = (t) => String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<"
 // 錯誤訊息截成給人看的長度（原本到處重寫 String(e?.message || e).slice(0, n)）
 const errText = (e, max = 300) => String(e?.message || e).slice(0, max);
 
-const PAGE_CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self'; img-src 'self' data: https://yt3.ggpht.com https://yt3.googleusercontent.com; connect-src 'self'; frame-ancestors 'none'";
+// frame-src 只放行 YouTube 的隱私強化嵌入（#181）：連結專案用它播放，控制走 postMessage，不載入 YouTube 的外部程式
+const PAGE_CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self'; img-src 'self' data: https://yt3.ggpht.com https://yt3.googleusercontent.com; connect-src 'self'; frame-src https://www.youtube-nocookie.com; frame-ancestors 'none'";
 
 // 頁面拆出去的 CSS／JS（#50）：只服務這份清單上的檔，路徑整串比對，碰不到 web/ 以外
 const PAGE_ASSETS = new Map([
@@ -84,7 +93,7 @@ const PAGE_ASSETS = new Map([
   ["/studio/libs.mjs", "text/javascript; charset=utf-8"],
   ["/studio/lang-en.js", "text/javascript; charset=utf-8"],
   ["/studio/i18n.js", "text/javascript; charset=utf-8"],
-  ...["common", "home", "timeline", "trim", "editor", "cues", "names", "speakers", "burn", "shorts", "youtube", "recap", "mindmap", "main"]
+  ...["common", "home", "player", "timeline", "trim", "editor", "cues", "layout", "ask", "notes", "names", "speakers", "burn", "shorts", "youtube", "recap", "mindmap", "main"]
     .map((n) => [`/studio/${n}.js`, "text/javascript; charset=utf-8"]),
 ]);
 
@@ -99,10 +108,19 @@ export const cutsKey = (cuts) => (cuts || []).map((c) => `${c.start}-${c.end}`).
 const CC_FAILED = "CC 字幕沒有掛上去";
 // 已經上傳到 YouTube 的自己的錄影（#75）：整理時才可以連原始錄影一起丟垃圾桶；從 YouTube 下載的走 trashVideo
 export const uploadedOwnVideo = (p) => Boolean(p?.youtube?.video_id) && p.youtube.status === "done" && !p.source?.downloaded;
-// 不要字幕的專案（#158）：demo 影片等不需要字幕的，不辨識、不校對，上傳時不燒也不掛 CC
-export const isPlain = (p) => p?.source?.captions === "none";
+// 不要字幕的專案（#158）：demo 影片等不需要字幕的，不辨識、不校對，上傳時不燒也不掛 CC。
+// 只認「不要字幕」建出來的 { kind: "none", captions: "none" }：網址匯入時影片本身沒有字幕軌也會記 captions: "none"
+// （改用 Soniox 辨識，有字幕），不能當成不要字幕（#173）。頁面用 publicView 的 plain，不自己判斷。
+export const isPlain = (p) => p?.source?.kind === "none" && p?.source?.captions === "none";
 // 不要字幕的專案沒有字幕可做的事（POST 的 action）
-const PLAIN_BLOCKED = new Set(["retry", "reprocess", "relayout", "describe", "recap", "module", "mindmap", "names", "speakers", "translate", "subtitle-file", "handoff"]);
+const PLAIN_BLOCKED = new Set(["retry", "reprocess", "relayout", "describe", "recap", "module", "mindmap", "names", "speakers", "translate", "subtitle-file", "handoff", "ask"]);
+// YouTube 連結專案（#181）：沒有下載影片，只抓字幕（或只抓音檔轉錄），編輯頁用嵌入播放。
+// 需要本機影片檔的動作都不能做
+export const isLinked = (p) => p?.source?.mode === "embed";
+// 連結專案的資料夾名稱：標題去掉檔名不能用的字元，最多 80 字
+export const safeTitle = (t) => [...String(t ?? "").replace(/[\/\\:*?"<>|\u0000-\u001f]+/g, " ").replace(/\s+/g, " ").trim()].slice(0, 80).join("").trim();
+// 重新處理可以（#182）：連結專案的「重新處理」是只抓音檔用 Soniox 重新辨識
+const LINK_BLOCKED = new Set(["burn", "suggest", "youtube", "captions", "speakers", "subtitle-file"]);
 export const needsCc = (y = {}) => Boolean(y.video_id) && y.subtitles !== "none" && !y.cc_added
   && (y.status === "cancelled" || y.subtitles === "burned" || (y.warnings || []).some((w) => w.startsWith(CC_FAILED)));
 
@@ -193,11 +211,20 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
   }
   const markDrivePending = (p) => { if (!d.driveDisabled()) p.drive = { ...(p.drive || {}), pending: new Date().toISOString() }; };
   const d = {
-    prepareSubtitles, burnSubtitles, preflight, syncCorrections, addCorrection, addCorrections, pickFile, pickSubtitles, reveal, ffprobeFps, remuxPreview, inCloudFolder,
-    thumbnails, waveform, poster, videoDurationMs, detectSilence, detectBlack, suggestFromTranscript, trash, describe,
+    prepareSubtitles, burnSubtitles, preflight, syncCorrections, addCorrection, addCorrections, pickFile, pickFolder, pickSubtitles, reveal, ffprobeFps, remuxPreview, inCloudFolder,
+    thumbnails, waveform, videoDurationMs, detectSilence, detectBlack, suggestFromTranscript, trash, describe,
     suggestShorts, renderShort, videoSize, writeBurnSubtitles, measureAdvances, nameFixes,
+    askAgent: (system, prompt, opts) => askVideo(system, prompt, opts),   // Ask AI（#171）
+    // Ask AI 查 wiki（#192、#194）：個人設定填了 wiki 查詢工具才有；工具不在這台就標 missing
+    askWiki: () => {
+      const name = wikiCli(loadAsrProfile().profile);
+      if (!name) return null;
+      const bin = wikiBin(name, env);
+      return { name, bin, ...(fs.existsSync(bin) ? {} : { missing: true }) };
+    },
     // 外語影片與 YouTube 下載（#56）
-    fetchInfo, fetchVideo, fetchCaptions, translateCues, prepareFromCaptions, taiwanConverter, downloadDir: () => youtubeDownloadDir(),
+    fetchInfo, fetchVideo, fetchCaptions, translateCues, prepareFromCaptions, taiwanConverter, downloadDir: () => youtubeDownloadDir(), linkDir: () => youtubeLinkDir(),
+    fetchAudio, fetchAutoCaptions, asrCached,   // YouTube 連結沒有作者字幕（#182）
     hasYtDlp: () => spawnSync("/usr/bin/which", ["yt-dlp"], { encoding: "utf8" }).status === 0,
     // YouTube（#40）：呼叫 Google 用的 fetch、存機密的鑰匙圈、用預設瀏覽器打開授權頁
     // 會後總結（#80）：送到會議轉錄 App 產生，和 App 同一份提示詞
@@ -241,11 +268,8 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
   const projects = new Map();   // id → 專案資料夾
   const jobs = new Map();       // id → { kind, step, progress, abort, done }
   const previewing = new Map(); // id → 正在重做預覽的 Promise（同一專案共用一次）
-  // 還沒開專案的影片（首頁的預覽與粗剪，recording-transcriber#4）：id → { video, name, duration_ms, ... }
+  // 還沒開專案的影片（預覽與粗剪，recording-transcriber#4）：id → { video, name, duration_ms, ... }
   const previews = new Map();
-  // 首頁清單上的影片：key → 路徑。縮圖只給清單上的影片，不接受任意路徑（#18）
-  let homeVideos = new Map();
-  const posters = new Map();    // key → { jpg, duration_ms }（只放記憶體，最多留 60 支）
   const downloads = new Map();  // 影片 → { at: 上次請 iCloud 下載的時間, error }（#20、#22）
   const waves = new Map();      // 預覽 id → 波形的 Promise（只放記憶體，最多留 6 支）
   let previewTmp = "";          // 瀏覽器播不了的格式先轉成 mp4 放這裡（私人暫存，關掉 Studio 時刪）
@@ -399,13 +423,171 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
     const { pending, root, ...rest } = dr;
     return { ...rest, where: driveWhere(env, loadAsrProfile().profile), ...(driveTasks.has(id) ? { pending: true } : {}) };
   };
+  // ---- Ask AI（#171）：對影片自由提問；對話存在專案資料夾的 ask.json（0600），不動 project.json 的 rev ----
+  const asking = new Map();   // 專案 id → { abort }：一支專案同時只問一題
+  const askErrorKind = (e) => {
+    const m = String(e?.message || "");
+    return /timed out/i.test(m) ? "timeout" : /could not (start|run)/i.test(m) ? "spawn" : /exited/i.test(m) ? "exit" : /reported an error/i.test(m) ? "agent-error" : "other";
+  };
+  const askFile = (dir) => path.join(dir, "ask.json");
+  function readAsk(dir) {
+    try { return cleanMessages(JSON.parse(fs.readFileSync(askFile(dir), "utf8")).messages); } catch { return []; }
+  }
+  // 頁面的開關：web／wiki 能不能勾。wiki："off" 沒設定（不顯示）、"missing" 找不到 wiki 查詢工具、"ready"
+  function askSources(project) {
+    const agent = project.proofreader || "claude", w = d.askWiki();
+    return { agent, web: agent === "claude", wiki: !w ? "off" : w.missing ? "missing" : "ready" };
+  }
+  async function askRoute(req, res, id, dir, project, action, body) {
+    if (action === "ask-stop") {
+      if (req.method !== "POST") return fail(res, 405, "method not allowed");
+      const a = asking.get(id);
+      if (!a) return fail(res, 409, "現在沒有在問 AI");
+      a.abort();
+      return send(res, 200, { stopped: true });
+    }
+    if (req.method === "GET") return send(res, 200, { messages: readAsk(dir), busy: asking.has(id), templates: templateIds(isForeign(project)), sources: askSources(project) });
+    if (req.method === "DELETE") {
+      if (asking.has(id)) return fail(res, 409, "AI 還在回答，先停止再清除");
+      fs.rmSync(askFile(dir), { force: true });
+      return send(res, 200, { messages: [] });
+    }
+    if (req.method !== "POST") return fail(res, 405, "method not allowed");
+    if (project.status !== "ready") return fail(res, 409, "字幕還沒好");
+    if (asking.has(id)) return fail(res, 409, "AI 還在回答上一個問題");
+    const question = typeof body.question === "string" ? body.question.trim() : "";
+    if (!question) return fail(res, 400, "請先打問題");
+    if ([...question].length > QUESTION_MAX) return fail(res, 400, `問題太長了，請在 ${QUESTION_MAX} 字以內`);
+    if (!(project.cues || []).some((c) => String(c.text || "").trim())) return fail(res, 409, "沒有字幕，AI 沒有東西可以看");
+    const foreign = isForeign(project);
+    const template = typeof body.template === "string" && templateIds(foreign).includes(body.template) ? body.template : "";
+    const tMs = Number.isFinite(body.t_ms) && body.t_ms >= 0 ? Math.round(body.t_ms) : null;
+    const who = project.proofreader || "claude";
+    const sources = cleanSources(body.sources);
+    try { checkProofreader(who, project.privacy); } catch {
+      // 只有個資規則擋下時才這樣說；其他（例如設定裡的校對者名字不認得）照實說，一樣擋下（#175）
+      if (MAY_USE_CHINA_CLOUD_LLM.includes(who) && project.privacy !== "public") return fail(res, 409, `這支影片標成含個資，不能交給 ${who}；請換一個校對 agent`);
+      return fail(res, 409, `這支影片設定的校對 agent（${who}）不能用；請換一個`);
+    }
+    if (!proofreaderAvailable(who)) return fail(res, 409, `${who} 沒有裝在這台電腦`);
+    // 外部來源（#192）：只有 claude 能用（只開搜尋、wiki 唯讀，見 lib/claude-stream.mjs）；頁面也會停用，這裡再擋一次
+    let wiki = null;
+    if (sources.length && who !== "claude") return fail(res, 409, `網路搜尋和查 wiki 只有校對 agent 是 claude 時能用（這支影片是 ${who}）`);
+    if (sources.includes("wiki")) {
+      wiki = d.askWiki();
+      if (!wiki) return fail(res, 409, "還沒設定 wiki：個人設定 asr-profile.json 要填 wiki_cli");
+      if (wiki.missing) return fail(res, 409, "這台電腦找不到 wiki 查詢工具，不能查 wiki");
+    }
+    const system = askSystemPrompt({ name: project.name, cues: project.cues, cuts: project.cuts || [], description: project.description || "", foreign });
+    const prompt = askUserPrompt({ question, tMs, history: readAsk(dir), template, foreign, sources });
+    const ac = new AbortController();
+    asking.set(id, { abort: () => ac.abort() });
+    const asked = new Date().toISOString();
+    try {
+      const r = await d.askAgent(system, prompt, { proofreader: who, signal: ac.signal,
+        ...(sources.length ? { sources: { web: sources.includes("web"), wiki: wiki ? { bin: wiki.bin } : null } } : {}) });
+      if (ac.signal.aborted) return fail(res, 409, "已經停止");
+      const text = String(r?.text ?? "").trim();
+      if (!text) return fail(res, 502, "AI 沒有回答，請再試一次");
+      const at = (x) => (tMs === null ? x : { ...x, t_ms: tMs });
+      const used = sourcesUsed(r?.tools);
+      const messages = cleanMessages([...readAsk(dir), at({ role: "user", text: question, at: asked, ...(template ? { template } : {}), ...(sources.length ? { sources } : {}) }),
+        at({ role: "assistant", text, at: new Date().toISOString(), ...(used.length ? { sources: used } : {}) })]);
+      writePrivate(askFile(dir), `${JSON.stringify({ version: 1, messages }, null, 2)}\n`);
+      return send(res, 200, { messages });
+    } catch (e) {
+      if (ac.signal.aborted) return fail(res, 409, "已經停止");
+      // 問題和回答可能有人名，不進 log；只記錯誤種類（完整訊息只回給這台電腦的頁面）
+      logError(`[studio] ask failed: ${askErrorKind(e)}`);
+      return fail(res, 502, `AI 沒回答成功：${errText(e, 200)}`);
+    } finally {
+      asking.delete(id);
+    }
+  }
+
+  // ---- 影片庫（#184）：加入的資料夾掃成樹、單獨加入的影片、YouTube 連結專案、其他最近的專案 ----
+  const libraryFile = () => path.join(stateDir(env), "library.json");
+  // 第一次用（沒有清單檔）：先放入舊首頁原本會掃的資料夾（影片、桌面、下載、iCloud 共用資料夾），舊首頁看得到的影片不會不見。
+  // 清單檔壞掉或讀不到：先當空的，不重建、不覆寫（broken 讓頁面說明）
+  function libraryList() {
+    const lib = loadLibrary(libraryFile());
+    if (lib.exists) return { folders: lib.folders, files: lib.files, broken: lib.broken };
+    const dirs = [...new Set(d.videoDirs().filter((x) => { try { return fs.statSync(x).isDirectory(); } catch { return false; } }).map((x) => path.resolve(x)))];
+    // 已經在別的資料夾裡面的（例如「影片」裡的「YouTube 下載」）不另外列，樹上就看得到
+    const seeded = { folders: dirs.filter((x) => !dirs.some((o) => o !== x && x.startsWith(`${o}${path.sep}`))), files: [] };
+    saveLibrary(libraryFile(), seeded);
+    return { ...seeded, broken: false };
+  }
+  // 改清單：壞掉的清單檔先備份成 library.json.broken 再寫新的
+  // 備份不了（例如清單檔讀不到）就不改，免得蓋掉唯一的一份（#186）
+  function writeLibrary(lib) {
+    if (lib.broken && !backupBroken(libraryFile())) throw new Error("影片庫的清單檔讀不到，也沒辦法先備份，所以沒有改它；請 agent 協助檢查 library.json");
+    saveLibrary(libraryFile(), lib);
+  }
+  // 做過字幕的影片：旁邊有「-字幕」專案資料夾
+  function libraryProject(video) {
+    const dir = realDir(projectDirFor(video));   // 和開專案時一樣用實際路徑，id 才對得上
+    if (!fs.existsSync(path.join(dir, "project.json"))) return null;
+    let pr;
+    try { pr = readProject(dir); } catch { return null; }
+    const id = projectId(dir);
+    projects.set(id, dir);
+    return { id, status: { burn: "burning", upload: "uploading" }[jobs.get(id)?.kind] || pr.status };
+  }
+  const markTree = (n) => ({ ...n, videos: n.videos.map((v) => ({ ...v, project: libraryProject(v.path) })), dirs: n.dirs.map(markTree) });
+  function libraryView() {
+    const lib = libraryList();
+    const folders = lib.folders.map((f) => {
+      let ok = false;
+      try { ok = fs.statSync(f).isDirectory(); } catch { /* 不見了 */ }
+      return ok ? { ...markTree(scanFolder(f)), missing: false } : { path: f, name: path.basename(f), videos: [], dirs: [], truncated: false, missing: true };
+    });
+    const files = lib.files.map((f) => {
+      try { const st = fs.statSync(f); return { path: f, name: path.basename(f), size: st.size, mtime: st.mtimeMs, project: libraryProject(f), missing: false }; } catch { return { path: f, name: path.basename(f), project: null, missing: true }; }
+    });
+    // 樹上真的列出來的影片（太深或超過數量沒列的，專案照樣放進「其他專案」，才找得到）
+    // 專案記的是實際路徑（realDir），比對前兩邊都換成實際路徑；資料夾只換根，不逐支查
+    const real = (x) => { try { return fs.realpathSync(x); } catch { return path.resolve(x); } };
+    const listed = new Set(lib.files.map(real));
+    for (const f of folders) {
+      const root = f.path, rroot = real(root);
+      const collect = (n) => { for (const v of n.videos) listed.add(rroot + v.path.slice(root.length)); n.dirs.forEach(collect); };
+      collect(f);
+    }
+    const covered = (v) => listed.has(real(v));
+    const recent = loadRecent(env).map((r) => {
+      let pr = null;
+      try { pr = readProject(r.dir); } catch { return null; }
+      const id = projectId(r.dir);
+      projects.set(id, r.dir);
+      return { id, name: pr.name, status: { burn: "burning", upload: "uploading" }[jobs.get(id)?.kind] || pr.status, link: isLinked(pr), video: sourceVideo(pr), duration_ms: pr.duration_ms || 0, updated: pr.updated };
+    }).filter(Boolean);
+    return {
+      folders, files, broken: Boolean(lib.broken),
+      links: recent.filter((x) => x.link).map(({ video, ...x }) => x),
+      // 影片不在影片庫的資料夾裡的專案（例如從別處打開過的），照樣列出來
+      others: recent.filter((x) => !x.link && !(x.video && covered(x.video))).map(({ video, ...x }) => x),
+    };
+  }
+
+  // 「⋯」整理視窗（#39、#75、#184）：只讀這一支——資料夾大小、輸出的影片、下載的影片、上傳狀態
+  function manageInfo(id, dir, pr) {
+    return { id, name: pr.name, status: { burn: "burning", upload: "uploading" }[jobs.get(id)?.kind] || pr.status, privacy: pr.privacy, updated: pr.updated, cues: pr.cues?.length || 0,
+      bytes: folderBytes(dir), outputs: Object.values(outputsOf(dir, pr)).map((x) => x.file), busy: jobs.has(id), downloaded: Boolean(pr.source?.downloaded), foreign: isForeign(pr),
+      recent: loadRecent(env).some((r) => r.dir === dir),
+      // 上傳過就能連原始錄影一起丟；還沒掛 CC 的先提醒
+      ...(pr.youtube?.video_id && pr.youtube.status === "done" ? { youtube: { url: pr.youtube.url, needs_cc: needsCc(pr.youtube) } } : {}),
+      ...(uploadedOwnVideo(pr) ? { original_bytes: fileBytes(sourceVideo(pr)) } : {}) };
+  }
+
   function publicView(id, dir, p) {
     const job = jobs.get(id);
     let key = null;
     const nowKey = () => (key ??= recapKey(recapParagraphs(recapCues(p))));
     const burned = p.burn?.output && fs.existsSync(path.join(dir, p.burn.output)) ? p.burn.output : "";
     return {
-      id, name: p.name, video: p.video, folder: dir, privacy: p.privacy, proofreader: p.proofreader, size: p.size || "medium", subtitle_style: styleOf(p),
+      id, name: p.name, video: p.video, folder: dir, privacy: p.privacy, proofreader: p.proofreader, size: p.size || "medium", subtitle_style: styleOf(p), plain: isPlain(p),
+      linked: isLinked(p), embed: isLinked(p) ? { id: p.source.id } : null,
       status: p.status, error: p.error || "", stopped_at: p.status === "cancelled" ? p.stopped_at || "" : "", rev: p.rev, fps: p.fps || 30, duration_ms: p.duration_ms || 0,
       cues: p.status === "ready" ? p.cues : [], cuts: p.cuts || [], suggestions: p.suggestions || null, description: p.description || "", report: p.report || null,
       burn: { ...(p.burn || {}), output: burned }, outputs: outputsOf(dir, p), youtube: p.youtube || null, youtube_suggest: p.youtube_suggest || null, handoff: p.handoff || null, shorts: shortsView(dir, p),
@@ -449,7 +631,7 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
     job.done = new Promise((r) => { job.finish = r; });
     const work = fs.mkdtempSync(path.join(dir, ".work-"));
     try {
-      if (!BROWSER_PLAYABLE.has(path.extname(p.video).toLowerCase())) {
+      if (!isLinked(p) && !BROWSER_PLAYABLE.has(path.extname(p.video).toLowerCase())) {
         job.step = "preview";
         await d.remuxPreview(p.video, path.join(dir, ".preview.mp4"), { signal: ac.signal });
       }
@@ -463,9 +645,16 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       const captions = p.source?.captions_file ? path.join(dir, path.basename(p.source.captions_file)) : "";
       // Discord 分軌（#129）：先對齊；有人沒錄進影片就把他那一軌補進去，之後的辨識、預覽、燒字幕、上傳都用補好的
       const spk = p.tracks && !captions ? await prepareTracks(p, dir, work, job, ac.signal) : null;
+      // YouTube 連結沒有字幕檔（#182）：辨識結果用影片 id 當快取鍵；沒存過才只抓音檔到工作資料夾（處理完隨資料夾刪掉）
+      const cacheId = isLinked(p) && !captions ? `youtube:${p.source.id}` : "";
+      let media = p.video;
+      if (cacheId && !d.asrCached(asrCache, { cacheId, lang: p.lang })) {
+        job.step = "audio";
+        media = await d.fetchAudio(p.source.id, work, { signal: ac.signal, onProgress: (x) => { job.progress = x; } });
+      }
       const r = captions && fs.existsSync(captions)
         ? await d.prepareFromCaptions({ privacy: p.privacy, proofreader: p.proofreader, lang: p.lang }, { cues: captionCues(p, captions), onStep: (s) => { job.step = s; }, signal: ac.signal })
-        : await d.prepareSubtitles({ video: p.video, privacy: p.privacy, engine: "soniox", proofreader: p.proofreader, terms: [], keep, durationMs: p.duration_ms, asrCache, lang: p.lang },
+        : await d.prepareSubtitles({ video: media, privacy: p.privacy, engine: "soniox", proofreader: p.proofreader, terms: [], keep, durationMs: p.duration_ms, asrCache, lang: p.lang, ...(cacheId ? { cacheId } : {}) },
           { work, onStep: (s) => { job.step = s; }, signal: ac.signal });
       if (ac.signal.aborted) throw new Error("cancelled");   // 最後一步剛好做完才按停止：照樣算停止
       if (Array.isArray(r.timing)) writePrivate(path.join(dir, "timing.json"), JSON.stringify(r.timing));
@@ -598,17 +787,21 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
 
   // 從 YouTube 下載一支影片、建立專案、開始做字幕（#56）。
   // 作者有上傳和影片同語言的字幕就直接用；只有自動字幕或沒有字幕時才送 Soniox。
-  async function runImport(key, vid, want) {
+  async function runImport(key, from, want) {
     const imp = imports.get(key);
+    const target = from.site === "youtube" ? from.id : from.url;   // 交給 yt-dlp 的只有 id 或組好的標準網址（lib/youtube-source.mjs ytTarget）
     const ac = new AbortController();
     imp.abort = () => ac.abort();
     let tmp = "", dirMade = "";
     try {
       imp.step = "info";
-      const info = await d.fetchInfo(vid, { signal: ac.signal });
+      const info = await d.fetchInfo(target, { signal: ac.signal });
+      const vid = info.id || from.id;   // 檔名裡的 [id] 是 yt-dlp 的影片 id（Facebook 分享短網址的代碼不是）
       if (info.is_live || info.live_status === "is_live" || info.live_status === "is_upcoming") throw new Error("直播中或還沒開始的影片不能下載");
       imp.title = info.title;
       const src = captionSource(info, want);
+      // 沒有作者字幕、又看不出語言：不猜（猜成英文會把中文影片當外語片翻譯），請使用者選（#182）
+      if (src.guessed) throw new Error("看不出這支影片說的是哪種語言，請先在網址旁邊選好語言再試一次");
       imp.captions = src.kind;
       imp.lang = src.lang;
       const proofreader = "claude", privacy = "public";
@@ -621,7 +814,7 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       if (!video) {
         imp.step = "download";
         tmp = fs.mkdtempSync(path.join(home, ".dl-"));
-        const got = await d.fetchVideo(vid, tmp, { signal: ac.signal, onProgress: (x) => { imp.progress = x; } });
+        const got = await d.fetchVideo(target, tmp, { signal: ac.signal, onProgress: (x) => { imp.progress = x; } });
         video = freeName(home, path.basename(got));
         fs.renameSync(got, video);
       }
@@ -641,9 +834,9 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       let captionsFile = "";
       if (src.kind === "author") {
         imp.step = "captions";
-        captionsFile = path.basename(await d.fetchCaptions(vid, src.track, dir, { signal: ac.signal }));
+        captionsFile = path.basename(await d.fetchCaptions(target, src.track, dir, { signal: ac.signal }));
       }
-      const source = { kind: "youtube", id: vid, url: info.url, title: info.title, uploader: info.uploader, captions: src.kind, ...(src.track ? { caption_track: src.track } : {}),
+      const source = { kind: from.site, id: vid, url: info.url || from.url, title: info.title, uploader: info.uploader, captions: src.kind, ...(src.track ? { caption_track: src.track } : {}),
         ...(captionsFile ? { captions_file: captionsFile } : {}), downloaded: true };
       const foreign = src.lang !== "zh";
       save(dir, { version: 1, video, name, privacy, proofreader, size: "medium", rev: 0, created: new Date().toISOString(), cues: [], description: "",
@@ -657,9 +850,84 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       // 下載到一半或建專案失敗：剛建的空資料夾收掉（裡面只有字幕檔）
       if (dirMade) fs.rmSync(dirMade, { recursive: true, force: true });
       Object.assign(imp, { status: ac.signal.aborted ? "cancelled" : "failed", error: ac.signal.aborted ? "" : redactPaths(String(e?.message || e)).slice(0, 300) });
-      if (!ac.signal.aborted) logError(`[studio] YouTube import failed: ${imp.error}`);
+      if (!ac.signal.aborted) logError(`[studio] ${from.site} import failed: ${imp.error}`);
     } finally {
       if (tmp) fs.rmSync(tmp, { recursive: true, force: true });
+      imp.abort = null;
+      imp.finished = Date.now();
+    }
+  }
+
+  // 只連結的 YouTube 匯入（#181）：不下載影片，只抓影片資訊與作者字幕建專案，編輯頁用嵌入播放。
+  // 專案資料夾放在「影片／YouTube 連結／<標題> [影片 id]-字幕」，同一支再貼一次就直接打開
+  async function runLinkImport(key, from, want, noCaptions = "soniox") {
+    const imp = imports.get(key);
+    const ac = new AbortController();
+    imp.abort = () => ac.abort();
+    let dirMade = "";
+    try {
+      imp.step = "info";
+      const info = await d.fetchInfo(from.id, { signal: ac.signal });
+      if (info.is_live || info.live_status === "is_live" || info.live_status === "is_upcoming") throw new Error("直播中或還沒開始的影片不能下載");
+      if (!info.embeddable) throw new Error("作者不允許在別的網站播放這支影片，不能只連結；請改用「下載影片」");
+      imp.title = info.title;
+      const src = captionSource(info, want);
+      imp.captions = src.kind;
+      imp.lang = src.lang;
+      if (src.guessed) throw new Error("看不出這支影片說的是哪種語言，請先在網址旁邊選好語言再試一次");
+      // 沒有作者字幕（#182）：選了自動字幕就用影片原語言那一軌；不然只抓音檔用 Soniox（建專案後在處理流程裡抓）
+      const autoTrack = src.kind === "author" ? "" : autoOrigTrack(info, src.lang);
+      if (src.kind !== "author" && noCaptions === "auto" && !autoTrack) throw new Error("這支影片沒有原語言的自動字幕；請改選「Soniox 轉錄」");
+      const how = src.kind === "author" ? "author" : noCaptions === "auto" ? "auto" : "soniox";
+      imp.captions = how;
+      const proofreader = "claude", privacy = "public";
+      d.preflight({ privacy, proofreader, engine: how === "soniox" ? "soniox" : "captions", burn: false });
+      const home = d.linkDir();
+      fs.mkdirSync(home, { recursive: true });
+      const vid = info.id || from.id;
+      const name = `${safeTitle(info.title) || vid} [${vid}]`;
+      const dir = realDir(path.join(home, `${name}-字幕`));
+      const id = projectId(dir);
+      if (fs.existsSync(path.join(dir, "project.json"))) {
+        projects.set(id, dir);
+        rememberRecent({ dir, name }, env);
+        Object.assign(imp, { status: "done", project: id, reopened: true });
+        return;
+      }
+      if (fs.existsSync(dir) && (!fs.statSync(dir).isDirectory() || fs.readdirSync(dir).length)) throw new Error(`「${path.basename(dir)}」資料夾已經有別的檔案，請先移走`);
+      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+      fs.chmodSync(dir, 0o700);
+      dirMade = dir;
+      let captionsFile = "", track = "";
+      if (how === "author") {
+        imp.step = "captions";
+        track = src.track;
+        captionsFile = path.basename(await d.fetchCaptions(vid, track, dir, { signal: ac.signal }));
+      } else if (how === "auto") {
+        imp.step = "captions";
+        track = autoTrack;
+        const json = await d.fetchAutoCaptions(vid, track, dir, { signal: ac.signal });
+        const cues = json3Cues(JSON.parse(fs.readFileSync(json, "utf8")));
+        fs.rmSync(json, { force: true });
+        if (!cues.length) throw new Error("自動字幕是空的；請改選「Soniox 轉錄」");
+        captionsFile = "captions.auto.vtt";
+        writePrivate(path.join(dir, captionsFile), cuesToVtt(cues));
+      }
+      const source = { kind: "youtube", mode: "embed", id: vid, url: info.url || from.url, title: info.title, uploader: info.uploader, captions: how,
+        ...(track ? { caption_track: track } : {}), ...(captionsFile ? { captions_file: captionsFile } : {}) };
+      const foreign = src.lang !== "zh";
+      save(dir, { version: 1, video: "", name, privacy, proofreader, size: "medium", rev: 0, created: new Date().toISOString(), cues: [], description: "",
+        fps: 30, duration_ms: Math.round((info.duration_s || 0) * 1000), cuts: [], status: "processing", ...(foreign ? { lang: src.lang, lang_mode: "both" } : {}), source });
+      dirMade = "";
+      projects.set(id, dir);
+      rememberRecent({ dir, name }, env);
+      startJob(id, () => prepareAndTranslate(id, dir));
+      Object.assign(imp, { status: "done", project: id });
+    } catch (e) {
+      if (dirMade) fs.rmSync(dirMade, { recursive: true, force: true });
+      Object.assign(imp, { status: ac.signal.aborted ? "cancelled" : "failed", error: ac.signal.aborted ? "" : redactPaths(String(e?.message || e)).slice(0, 300) });
+      if (!ac.signal.aborted) logError(`[studio] youtube link import failed: ${imp.error}`);
+    } finally {
       imp.abort = null;
       imp.finished = Date.now();
     }
@@ -1039,7 +1307,7 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
     return video;
   }
 
-  // 首頁點影片：還不建資料夾、不送辨識，只讓瀏覽器播放、看時間軸、先粗剪
+  // 影片庫點影片：還不建資料夾、不送辨識，只讓瀏覽器播放、看時間軸、先粗剪
   function openPreview(body) {
     const video = resolveVideo(body.video);
     // 還在 iCloud：請它下載，回 202 讓頁面過幾秒再來；下載請求 30 秒內不重送
@@ -1131,30 +1399,6 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
     send(res, 200, { bucket_ms: w.bucket_ms, peaks: Buffer.from(w.peaks).toString("base64") });
   }
 
-  // 首頁縮圖：一支好了就送一行（NDJSON），同時最多抓 3 支；頁面離開就停
-  async function servePosters(req, res) {
-    const ac = new AbortController();
-    res.on("close", () => ac.abort());
-    res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
-    const todo = [...homeVideos].filter(([, v]) => !v.offline);
-    const line = (key, x) => { if (!res.writableEnded) res.write(`${JSON.stringify({ key, duration_ms: x.duration_ms, jpg: x.jpg ? x.jpg.toString("base64") : null })}\n`); };
-    const worker = async () => {
-      while (todo.length && !ac.signal.aborted) {
-        const [key, v] = todo.shift();
-        let x = posters.get(key);
-        if (!x) {
-          x = await d.poster(v.path, { signal: ac.signal }).catch(() => ({ jpg: null, duration_ms: 0 }));
-          if (ac.signal.aborted) break;
-          posters.set(key, x);
-          if (posters.size > 60) posters.delete(posters.keys().next().value);
-        }
-        line(key, x);
-      }
-    };
-    await Promise.all([worker(), worker(), worker()]);
-    res.end();
-  }
-
   async function serveThumbs(req, res, video, durationMs) {
     const ac = new AbortController();
     res.on("close", () => ac.abort());
@@ -1191,8 +1435,8 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
     const own = body.subtitles ? readSubtitleFile(body.subtitles) : null;
     if (own && body.tracks) throw new Error("用字幕檔時不能同時用 Discord 分軌（分軌是替辨識出來的字幕標講者）");
     if (fs.existsSync(path.join(dir, "project.json"))) {
-      if (own) throw new Error("這支影片之前做過字幕；要改用字幕檔，先在首頁按「整理…」清掉這支的處理資料");
-      if (plain) throw new Error("這支影片之前做過字幕；要改用「不要字幕」，先在首頁按「整理…」清掉這支的處理資料");
+      if (own) throw new Error("這支影片之前做過字幕；要改用字幕檔，先在左欄影片庫按這支旁邊的「⋯」清掉處理資料");
+      if (plain) throw new Error("這支影片之前做過字幕；要改用「不要字幕」，先在左欄影片庫按這支旁邊的「⋯」清掉處理資料");
       const p = readProject(dir);
       // 這次改標成含個資（公開 → 非公開）：照這次的算；原本的校對者若可能走中國大陸雲端模型就改回 Claude
       const stricter = p.privacy === "public" && privacy !== "public";
@@ -1291,7 +1535,7 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       });
     }
     if (req.method === "GET" && PAGE_ASSETS.has(p)) return send(res, 200, fs.readFileSync(path.join(TOOL_ROOT, "web", p.slice(1))), PAGE_ASSETS.get(p));
-    if (req.method === "GET" && (p === "/cue-ops.mjs" || p === "/cuts.mjs" || p === "/shorts.mjs" || p === "/subtitle-box.mjs")) return send(res, 200, fs.readFileSync(path.join(TOOL_ROOT, "lib", p.slice(1))), "text/javascript; charset=utf-8");
+    if (req.method === "GET" && (p === "/cue-ops.mjs" || p === "/cuts.mjs" || p === "/shorts.mjs" || p === "/subtitle-box.mjs" || p === "/chapters.mjs" || p === "/studio-layout.mjs" || p === "/ask-ai.mjs" || p === "/study-notes.mjs")) return send(res, 200, fs.readFileSync(path.join(TOOL_ROOT, "lib", p.slice(1))), "text/javascript; charset=utf-8");
     if (req.method === "GET" && p === "/healthz") return send(res, 200, { ok: true, app: "subtitle-studio" });
     // 會議轉錄 App 的共用元件（#111，meeting-scribe#157）：直接讀這台 meeting-scribe checkout 的 web/shared/，不複製。
     // 只認清單上的檔名；checkout 不在就 404，頁面會說明並退回純文字
@@ -1327,31 +1571,27 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
         return fail(res, 502, errText(e, 300));
       }
     }
-    if (req.method === "GET" && p === "/api/home") {
-      const recent = loadRecent(env).map((r) => {
-        const id = projectId(r.dir);
-        projects.set(id, r.dir);
-        let pr = null;
-        try { pr = readProject(r.dir); } catch { /* 壞掉的專案略過 */ }
-        return pr && { id, name: pr.name, status: { burn: "burning", upload: "uploading" }[jobs.get(id)?.kind] || pr.status, privacy: pr.privacy, updated: pr.updated, cues: pr.cues?.length || 0,
-          bytes: folderBytes(r.dir), outputs: Object.values(outputsOf(r.dir, pr)).map((x) => x.file), busy: jobs.has(id), downloaded: Boolean(pr.source?.downloaded), foreign: isForeign(pr),
-          // 整理視窗（#75）：上傳過就能連原始錄影一起丟；還沒掛 CC 的先提醒
-          ...(pr.youtube?.video_id && pr.youtube.status === "done" ? { youtube: { url: pr.youtube.url, needs_cc: needsCc(pr.youtube) } } : {}),
-          ...(uploadedOwnVideo(pr) ? { original_bytes: fileBytes(sourceVideo(pr)) } : {}) };
-      }).filter(Boolean);
-      homeVideos = new Map();
-      const icloudDir = d.icloudDir();
-      const icloud = icloudDir ? realDir(icloudDir) + path.sep : "";
-      const videos = recentVideos(d.videoDirs(), 24).map((v) => {
-        const key = createHash("sha256").update(`${v.path}\0${v.mtime}\0${v.size}`).digest("hex").slice(0, 16);
-        // iCloud 還沒下載到這台的不抓縮圖：讀它會先整支下載
-        const offline = Boolean(d.isOffline(v.path));
-        homeVideos.set(key, { path: v.path, offline });
-        return { ...v, key, offline, icloud: Boolean(icloud) && realDir(v.path).startsWith(icloud) };
-      });
-      return send(res, 200, { recent, videos, tools: tools() });
+    // 這台電腦有哪些校對 agent、有沒有 yt-dlp 和 Soniox 金鑰（#184 起取代舊首頁的 /api/home）
+    if (req.method === "GET" && p === "/api/tools") return send(res, 200, { tools: tools() });
+    // 影片庫（#184）：GET 清單、POST add（用 Finder 選資料夾或影片檔）、POST remove
+    if (p === "/api/library" || p === "/api/library/add" || p === "/api/library/remove") {
+      if (req.method === "GET" && p === "/api/library") return send(res, 200, libraryView());
+      if (req.method !== "POST" || p === "/api/library") return fail(res, 405, "method not allowed");
+      const b = await readBody(req);
+      let lib = libraryList();
+      if (p === "/api/library/add") {
+        const kind = b.kind === "file" ? "file" : "folder";
+        const picked = kind === "file" ? await d.pickFile() : await d.pickFolder();
+        if (!picked) return send(res, 200, { cancelled: true });
+        let next;
+        try { next = addEntry(lib, kind, picked); } catch (e) { return fail(res, 400, e.message); }
+        try { writeLibrary({ ...next, broken: lib.broken }); } catch (e) { return fail(res, 500, e.message); }
+        return send(res, 200, { ...libraryView(), added: path.resolve(picked) });
+      }
+      if (typeof b.path !== "string" || ![...lib.folders, ...lib.files].includes(b.path)) return fail(res, 404, "影片庫裡沒有這個資料夾或檔案");
+      try { writeLibrary({ ...removeEntry(lib, b.path), broken: lib.broken }); } catch (e) { return fail(res, 500, e.message); }
+      return send(res, 200, libraryView());
     }
-    if (req.method === "GET" && p === "/api/home/posters") return servePosters(req, res);
     // 沒有 icon link 的頁面，瀏覽器會自己要 /favicon.ico：也給 App 圖示，分頁才不會是地球
     if (req.method === "GET" && (p === "/app-icon.png" || p === "/favicon.ico")) {
       return send(res, 200, fs.readFileSync(path.join(TOOL_ROOT, "assets", "studio-icon.png")), "image/png", { "Cache-Control": "max-age=86400" });
@@ -1397,20 +1637,27 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       return send(res, 200, { people: rosterList(env) });
     }
     if (req.method === "POST" && p === "/api/open") return send(res, 200, await openProject(await readBody(req)));
-    // 從 YouTube 下載外語影片做雙語字幕（#56）：開始、看進度、停止
+    // 從 YouTube、Facebook、X 下載影片做字幕（#56、#173）：開始、看進度、停止
     if (req.method === "POST" && p === "/api/import") {
       const b = await readBody(req);
-      const vid = youtubeId(b.url);
-      if (!vid) return fail(res, 400, "這不是 YouTube 影片的網址");
+      const src = videoSource(b.url);
+      if (!src) return fail(res, 400, "這不是認得的影片網址（YouTube、Facebook 或 X）");
       const want = String(b.lang || "");
       if (want && !LANG.test(want)) return fail(res, 400, "影片語言不對");
-      if (!d.hasYtDlp()) return fail(res, 409, "這台電腦沒有 yt-dlp，沒辦法下載 YouTube 影片");
+      // Facebook、X 的影片資訊通常沒有語言，不猜（猜錯會整支翻錯）：請使用者先選
+      if (src.site !== "youtube" && !want) return fail(res, 400, `${SITE_LABEL[src.site]} 的影片看不出說的是哪種語言，請先在旁邊選好語言`);
+      // 只連結（#181）：YouTube 才能嵌入播放；Facebook、X 沒有能控制播放的嵌入，要下載
+      const link = b.mode === "link";
+      // 沒有作者字幕時（#182）：預設只抓音檔用 Soniox；也可以選 YouTube 自動字幕（免費、品質較差）
+      const noCaptions = b.captions === "auto" ? "auto" : "soniox";
+      if (link && src.site !== "youtube") return fail(res, 400, "只有 YouTube 影片可以只連結；Facebook 和 X 要下載影片");
+      if (!d.hasYtDlp()) return fail(res, 409, "這台電腦沒有 yt-dlp，沒辦法下載網路影片");
       for (const [k, v] of imports) if (v.finished && Date.now() - v.finished > 3600_000) imports.delete(k);
-      const running = [...imports.values()].find((x) => x.vid === vid && x.status === "running");
+      const running = [...imports.values()].find((x) => x.src === src.key && Boolean(x.link) === link && x.status === "running");   // 只連結和下載是兩件事
       if (running) return send(res, 200, { import: running.key });
       const key = randomBytes(8).toString("hex");
-      imports.set(key, { key, vid, status: "running", step: "info", progress: 0, title: "", started: Date.now() });
-      runImport(key, vid, want).catch((e) => logError(`[studio] import error: ${errText(e, 200)}`));
+      imports.set(key, { key, src: src.key, site: src.site, link, status: "running", step: "info", progress: 0, title: "", started: Date.now() });
+      (link ? runLinkImport(key, src, want, noCaptions) : runImport(key, src, want)).catch((e) => logError(`[studio] import error: ${errText(e, 200)}`));
       return send(res, 200, { import: key });
     }
     const im = /^\/api\/import\/([0-9a-f]{16})(?:\/(cancel))?$/.exec(p);
@@ -1469,9 +1716,10 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       const found = load(sm[1]);
       if (!found) return fail(res, 404, "找不到這個專案");
       if (req.method !== "GET" && isPlain(found.project)) return fail(res, 409, "這支影片是「不要字幕」的，沒有字幕可以挑短片");
+      if (req.method !== "GET" && isLinked(found.project)) return fail(res, 409, "這支是 YouTube 連結（沒有下載影片），不能做這件事；要剪輯或燒字幕請用「下載影片」另外匯入");
       return shortsRoute(req, res, sm[1], found.dir, found.project, sm[2] || sm[4] || "", sm[3] || "", body);
     }
-    const m = /^\/api\/projects\/([0-9a-f]{16})(?:\/(video|thumbs|wave|burn|suggest|cancel|reveal|retry|reprocess|relayout|forget|clear|youtube|captions|recap|module|mindmap|drive|describe|handoff|names|speakers|translate|subtitle-file))?$/.exec(p);
+    const m = /^\/api\/projects\/([0-9a-f]{16})(?:\/(video|thumbs|wave|burn|suggest|cancel|reveal|retry|reprocess|relayout|forget|clear|youtube|captions|recap|module|mindmap|drive|describe|handoff|names|speakers|translate|subtitle-file|ask|ask-stop|notes|manage))?$/.exec(p);
     if (!m) return fail(res, 404, "not found");
     const [, id, action] = m;
     // 先收完內容再讀專案，存檔才是拿最新的版本比 rev（中間可能剛好燒完字幕）
@@ -1481,6 +1729,9 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
     const { dir, project } = found;
 
     if (req.method === "GET" && !action) return send(res, 200, publicView(id, dir, project));
+    if (req.method === "GET" && action === "manage") return send(res, 200, manageInfo(id, dir, project));
+    if (req.method === "GET" && (action === "video" || action === "thumbs" || action === "wave") && isLinked(project)) return fail(res, 404, "這支是 YouTube 連結，沒有本機影片檔");
+    if (req.method === "GET" && action === "speakers" && isLinked(project)) return send(res, 200, { craig: null });
     if (req.method === "GET" && action === "video") {
       const preview = path.join(dir, ".preview.mp4");
       // 瀏覽器播不了的格式：預覽檔不見了（移出清單時刪掉）就重做一份
@@ -1544,6 +1795,30 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
     if (req.method === "POST" && isPlain(project)
       && (PLAIN_BLOCKED.has(action) || (action === "burn" && body.subtitles !== false) || (action === "suggest" && body.ai !== false))) {
       return fail(res, 409, "這支影片是「不要字幕」的，沒有字幕可以做這件事");
+    }
+    if (req.method === "POST" && isLinked(project) && LINK_BLOCKED.has(action)) {
+      return fail(res, 409, "這支是 YouTube 連結（沒有下載影片），不能做這件事；要剪輯或燒字幕請用「下載影片」另外匯入");
+    }
+    // Ask AI（#171）：GET 對話、POST 提問、DELETE 清除；ask-stop 停止
+    if (action === "ask" || action === "ask-stop") return askRoute(req, res, id, dir, project, action, body);
+    // 學習筆記（#172）：GET 讀 notes.md（手改的也讀得回來）、PUT 整份存回；全部刪光就刪檔。「不要字幕」的影片也能記
+    if (action === "notes") {
+      const file = path.join(dir, "notes.md");
+      if (req.method === "GET") {
+        let md = "";
+        try { md = fs.readFileSync(file, "utf8"); } catch { /* 還沒有筆記 */ }
+        return send(res, 200, { notes: parseNotes(md) });
+      }
+      if (req.method !== "PUT") return fail(res, 405, "method not allowed");
+      const r = cleanNotes(body.notes, { durationMs: project.duration_ms || Infinity });
+      if (r.error === "too-many") return fail(res, 400, `筆記最多 ${NOTES_MAX} 則`);
+      if (r.error === "too-long") return fail(res, 400, `每則筆記最多 ${NOTE_MAX} 字`);
+      if (r.error) return fail(res, 400, "筆記的格式不對");
+      const md = formatNotes(r.notes, { title: project.name });
+      if (Buffer.byteLength(md) > NOTES_FILE_MAX) return fail(res, 400, "筆記太多了，整份超過 1 MB");
+      if (r.notes.length) writePrivate(file, md);
+      else fs.rmSync(file, { force: true });
+      return send(res, 200, { notes: r.notes });
     }
     if (req.method === "POST" && action === "burn") {
       if (jobs.has(id)) return fail(res, 409, "已經在處理");
@@ -1874,6 +2149,11 @@ export function createStudio({ env = process.env, token = randomBytes(24).toStri
       // 停止過的（#67）和失敗的一樣可以按「重新開始」
       const ok = action === "retry" ? ["failed", "cancelled"].includes(project.status) : ["ready", "failed", "cancelled"].includes(project.status);
       if (jobs.has(id) || !ok) return fail(res, 409, action === "retry" ? "現在不能重試" : "現在不能重新處理");
+      // YouTube 連結用作者字幕或自動字幕的（#182）：「重新處理」＝改用 Soniox 重新辨識（只抓音檔）
+      if (action === "reprocess" && isLinked(project) && project.source?.captions !== "soniox") {
+        const { captions_file: _cf, caption_track: _ct, ...rest } = project.source;
+        project.source = { ...rest, captions: "soniox" };
+      }
       // 用作者字幕或自己的字幕檔（#56、#148）的專案不辨識，不用 Soniox 金鑰
       d.preflight({ privacy: project.privacy, proofreader: project.proofreader, engine: project.source?.captions_file ? "none" : "soniox", burn: false });
       project.status = "processing";
@@ -2110,6 +2390,18 @@ async function pickFile() {
     p.stdout.on("data", (x) => { out += x; });
     p.on("error", () => resolve(""));
     p.on("close", (code) => resolve(code === 0 ? out.trim() : ""));
+  });
+}
+
+// 影片庫（#184）：用 Finder 選要加入的資料夾
+async function pickFolder() {
+  return new Promise((resolve) => {
+    const script = ['activate', 'set f to choose folder with prompt "選擇要加入影片庫的資料夾" default location (path to movies folder)', "POSIX path of f"];
+    const p = spawn("osascript", script.flatMap((s) => ["-e", s]), { stdio: ["ignore", "pipe", "ignore"] });
+    let out = "";
+    p.stdout.on("data", (x) => { out += x; });
+    p.on("error", () => resolve(""));
+    p.on("close", (code) => resolve(code === 0 ? out.trim().replace(/\/$/, "") || "/" : ""));
   });
 }
 

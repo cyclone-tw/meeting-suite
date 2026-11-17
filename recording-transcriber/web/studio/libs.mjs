@@ -4,8 +4,16 @@ import * as ops from "/cue-ops.mjs";
 import * as cutOps from "/cuts.mjs";
 import * as shortOps from "/shorts.mjs";
 import * as boxOps from "/subtitle-box.mjs";
+import * as chapterOps from "/chapters.mjs";
+import * as layoutOps from "/studio-layout.mjs";
+import * as askOps from "/ask-ai.mjs";
+import * as notesOps from "/study-notes.mjs";
 
 window.ops = ops;
 window.cutOps = cutOps;
 window.shortOps = shortOps;
 window.boxOps = boxOps;
+window.chapterOps = chapterOps;
+window.layoutOps = layoutOps;
+window.askOps = askOps;
+window.notesOps = notesOps;

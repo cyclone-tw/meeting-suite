@@ -26,6 +26,11 @@ case "${PORT}${HTTPS_PORT}" in *[!0-9]*|"") echo "MEETING_SCRIBE_PORT／HTTPS_PO
 command -v tailscale >/dev/null || { echo "找不到 tailscale" >&2; exit 1; }
 
 # 自動 pull 的資料夾：先檢查完再動手。只收絕對路徑、英數與 . _ - /（要寫進 unit 的 ExecStart），而且要是 git checkout
+STUDENTS_DIR="${MEETING_SCRIBE_STUDENTS_DIR:-}"
+if [ -n "${STUDENTS_DIR}" ]; then
+  case "${STUDENTS_DIR}" in /*) ;; *) echo "MEETING_SCRIBE_STUDENTS_DIR 要是絕對路徑：${STUDENTS_DIR}" >&2; exit 1;; esac
+  case "${STUDENTS_DIR}" in *[!A-Za-z0-9._/-]*|*/../*|*/..) echo "MEETING_SCRIBE_STUDENTS_DIR 只能有英數與 . _ - /：${STUDENTS_DIR}" >&2; exit 1;; esac
+fi
 PULL_DIRS=()
 if [ -n "${MEETING_SCRIBE_PULL_DIRS:-}" ]; then
   # 空白、tab、換行都當分隔；不展開萬用字元
@@ -101,6 +106,30 @@ PYEOF
   fi
 fi
 
+# 學生資料從 A1 Wiki 入口同步（#222）：有設 MEETING_SCRIBE_STUDENTS_DIR 才寫 unit；key 與 known_hosts 由管理者先放好
+SYNC_UNIT=/etc/systemd/system/meeting-scribe-students-sync.service
+SYNC_TIMER=/etc/systemd/system/meeting-scribe-students-sync.timer
+# 公開版沒有這個功能（私人環境專用，匯出時排除，#199）：unit 範本不在就警告並略過，不讓安裝失敗
+if [ -n "${STUDENTS_DIR}" ] && [ ! -f "${REPO}/deploy/meeting-scribe-students-sync.service.in" ]; then
+  echo "警告：這個版本沒有學生資料同步功能，MEETING_SCRIBE_STUDENTS_DIR 不會有作用" >&2
+  STUDENTS_DIR=""
+fi
+if [ -n "${STUDENTS_DIR}" ]; then
+  sync_tmp="$(mktemp)"
+  sed -e "s|@REPO@|${REPO}|g" -e "s|@STUDENTS@|${STUDENTS_DIR}|g" "${REPO}/deploy/meeting-scribe-students-sync.service.in" > "${sync_tmp}"
+  grep -q '@[A-Z]*@' "${sync_tmp}" && { rm -f "${sync_tmp}"; echo "sync unit 還有沒換掉的 @…@" >&2; exit 1; }
+  install -m 644 -o root -g root "${sync_tmp}" "${SYNC_UNIT}"
+  rm -f "${sync_tmp}"
+  install -m 644 -o root -g root "${REPO}/deploy/meeting-scribe-students-sync.timer.in" "${SYNC_TIMER}"
+  systemd-analyze verify "${SYNC_UNIT}" "${SYNC_TIMER}" 2>&1 | grep -v '^$' || true
+  systemctl daemon-reload
+  systemctl enable meeting-scribe-students-sync.timer >/dev/null 2>&1
+  systemctl restart meeting-scribe-students-sync.timer
+  sync_state="每 15 分鐘從 A1 同步學生資料到 ${STUDENTS_DIR}"
+else
+  sync_state="沒設 MEETING_SCRIBE_STUDENTS_DIR，沒有安裝學生資料同步"
+fi
+
 # 學生資料／擴充包自動更新（#120）：有設 MEETING_SCRIBE_PULL_DIRS 才寫 unit；內容一樣時重寫也沒差
 PULL_UNIT=/etc/systemd/system/meeting-scribe-wiki-pull.service
 PULL_TIMER=/etc/systemd/system/meeting-scribe-wiki-pull.timer
@@ -172,6 +201,7 @@ echo "healthz: ${health}"
 echo "python: ${PYTHON}"
 echo "Claude Code：${claude_bin}；登入 token：${claude_token}"
 echo "Codex：${codex_state}"
-echo "學生資料自動更新：${pull_state}"
+echo "擴充包自動更新：${pull_state}"
+echo "學生資料同步：${sync_state}"
 DNS="$(tailscale status --self --json | "${PYTHON}" -I -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')"
 echo "網址：https://${DNS}:${HTTPS_PORT}/"

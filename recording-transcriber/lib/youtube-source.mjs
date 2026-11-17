@@ -33,6 +33,20 @@ export function youtubeId(value) {
 
 export const watchUrl = (id) => `https://www.youtube.com/watch?v=${id}`;
 
+// 交給 yt-dlp 的網址（#173）：YouTube 的 11 碼 id 換成標準網址；Facebook、X 只收 lib/video-source.mjs 組出來的標準網址。
+// 這裡再檢查一次，使用者貼的字串不會直接進 yt-dlp（test/video-source.test.mjs 確認兩邊的格式一致）
+const CANON = /^https:\/\/(?:www\.facebook\.com\/(?:share\/[vr]\/[A-Za-z0-9][A-Za-z0-9_-]{4,39}\/|reel\/\d{5,25}|watch\/\?v=\d{5,25})|fb\.watch\/[A-Za-z0-9][A-Za-z0-9_-]{4,39}\/|x\.com\/i\/status\/\d{5,25})$/;
+// Facebook 的標題前面會帶「7.4K views · 71 reactions | 」，數字每天變，專案名稱和檔名都拿掉（#173）
+const FB_TITLE_NOISE = String.raw`^\s*[\d.,]+\s*[KMB萬億]?\s*views?\s*·\s*[\d.,]+\s*[KMB萬億]?\s*reactions?\s*\|\s*`;
+export const cleanTitle = (title) => String(title ?? "").replace(new RegExp(FB_TITLE_NOISE, "i"), "");
+const isFacebook = (url) => /^https:\/\/(?:www\.facebook\.com|fb\.watch)\//.test(url);
+
+export function ytTarget(target) {
+  if (ID.test(target)) return watchUrl(target);
+  if (CANON.test(target)) return target;
+  throw new Error("影片網址的格式不對");
+}
+
 // 語言代碼只留主要部分：en-US → en、zh-Hant → zh
 export const baseLang = (code) => String(code || "").toLowerCase().split(/[-_]/)[0].replace(/[^a-z]/g, "");
 
@@ -51,20 +65,24 @@ export function captionSource(info, want = "") {
     || (author.length === 1 ? baseLang(author[0]) : author.some((k) => baseLang(k) === "en") ? "en" : "");
   // 作者字幕要和影片同一種語言（作者常另外上傳別種語言的翻譯）
   const track = lang ? author.find((k) => k.toLowerCase() === lang) || author.find((k) => baseLang(k) === lang) : "";
+  // guessed：什麼線索都沒有、照舊當英文。要送 Soniox 的（沒有作者字幕）不能用猜的，匯入會請使用者選（#182）
+  const guessed = !lang;
   lang ||= "en";
   if (track) return { kind: "author", track, lang };
-  return { kind: auto.length ? "auto" : "none", track: "", lang };
+  return { kind: auto.length ? "auto" : "none", track: "", lang, ...(guessed ? { guessed: true } : {}) };
 }
 
 // 只留需要的影片資訊（yt-dlp -J 的輸出很大，含所有格式）
 export function pickInfo(raw) {
   return {
-    id: String(raw?.id || ""), title: String(raw?.title || raw?.id || "").replace(/\s+/g, " ").trim().slice(0, 200),
+    id: String(raw?.id || ""), title: cleanTitle(String(raw?.title || raw?.id || "").replace(/\s+/g, " ").trim()).slice(0, 200),
     uploader: String(raw?.uploader || raw?.channel || "").slice(0, 120), duration_s: Number(raw?.duration) || 0,
-    language: raw?.language || "", url: raw?.webpage_url || (raw?.id ? watchUrl(raw.id) : ""),
+    // 沒有 webpage_url 時只有 YouTube 能用 id 組回網址；Facebook、X 留空，匯入時改用組好的標準網址（#175）
+    language: raw?.language || "", url: raw?.webpage_url || (raw?.id && /^youtube/i.test(raw?.extractor_key || raw?.extractor || "youtube") ? watchUrl(raw.id) : ""),
     subtitles: Object.fromEntries(Object.keys(raw?.subtitles || {}).map((k) => [k, true])),
     automatic_captions: Object.fromEntries(Object.keys(raw?.automatic_captions || {}).map((k) => [k, true])),
     is_live: Boolean(raw?.is_live), live_status: raw?.live_status || "",
+    embeddable: raw?.playable_in_embed !== false,   // 作者關掉「允許嵌入」的影片不能只連結（#181）
   };
 }
 
@@ -135,7 +153,7 @@ export function runYtDlp(args, { signal, onLine = () => {}, bin = "yt-dlp" } = {
 const lastError = (r) => String(r.stderr || "").trim().split("\n").filter((l) => /ERROR/.test(l)).pop()?.replace(/^ERROR:\s*/, "").slice(0, 200) || `yt-dlp exit ${r.code}`;
 
 export async function fetchInfo(id, { run = runYtDlp, signal } = {}) {
-  const r = await run(["-J", "--no-warnings", "--no-playlist", "--skip-download", "--", watchUrl(id)], { signal });
+  const r = await run(["-J", "--no-warnings", "--no-playlist", "--skip-download", "--", ytTarget(id)], { signal });
   if (signal?.aborted) throw new Error("cancelled");
   if (r.code !== 0) throw new Error(`讀不到這支影片的資訊：${lastError(r)}`);
   return pickInfo(JSON.parse(r.stdout));
@@ -144,7 +162,7 @@ export async function fetchInfo(id, { run = runYtDlp, signal } = {}) {
 // 下載作者字幕的一軌到 dir/captions.<track>.vtt，回傳檔案路徑
 export async function fetchCaptions(id, track, dir, { run = runYtDlp, signal } = {}) {
   const r = await run(["--no-warnings", "--no-playlist", "--skip-download", "--write-subs", "--sub-langs", track, "--sub-format", "vtt",
-    "-o", path.join(dir, "captions.%(ext)s"), "--", watchUrl(id)], { signal });
+    "-o", path.join(dir, "captions.%(ext)s"), "--", ytTarget(id)], { signal });
   if (signal?.aborted) throw new Error("cancelled");
   const file = fs.readdirSync(dir).map((n) => path.join(dir, n)).find((f) => /^captions\..+\.vtt$/.test(path.basename(f)));
   if (r.code !== 0 || !file) throw new Error(`作者字幕下載不下來：${r.code !== 0 ? lastError(r) : "沒有字幕檔"}`);
@@ -162,7 +180,9 @@ export async function fetchVideo(id, dir, { run = runYtDlp, signal, onProgress =
     "--merge-output-format", "mp4",
     "--progress-template", "download:PROG %(info.format_id)s %(progress.downloaded_bytes)s %(progress.total_bytes)s %(progress.total_bytes_estimate)s",
     "--print", "after_move:FILE %(filepath)s",
-    "-o", path.join(dir, "%(title).80B [%(id)s].%(ext)s"), "--", watchUrl(id),
+    // 檔名也用拿掉前綴的標題（規則是程式裡固定的，不含使用者輸入）
+    ...(isFacebook(ytTarget(id)) ? ["--replace-in-metadata", "title", `(?i)${FB_TITLE_NOISE}`, ""] : []),
+    "-o", path.join(dir, "%(title).80B [%(id)s].%(ext)s"), "--", ytTarget(id),
   ], {
     signal,
     onLine: (line) => {
@@ -182,6 +202,50 @@ export async function fetchVideo(id, dir, { run = runYtDlp, signal, onProgress =
   if (signal?.aborted) throw new Error("cancelled");
   if (r.code !== 0) throw new Error(`影片下載不下來：${lastError(r)}`);
   if (!final || !fs.existsSync(final)) throw new Error("影片下載不下來：找不到下載好的檔案");
+  onProgress(1);
+  return final;
+}
+
+// ---- YouTube 連結專案沒有作者字幕（#182）----
+// 自動字幕只用影片原語言那一軌（「<語言>-orig」）；其他軌是 YouTube 機器翻譯的，不用
+export function autoOrigTrack(info, lang) {
+  const keys = Object.keys(info?.automatic_captions || {}).filter((k) => usableTrack(k) && /-orig$/i.test(k));
+  return keys.find((k) => baseLang(k) === baseLang(lang)) || "";
+}
+
+// 只抓自動字幕（json3：每段有開始時間與文字），不下載影片
+export async function fetchAutoCaptions(id, track, dir, { run = runYtDlp, signal } = {}) {
+  if (!usableTrack(track)) throw new Error("字幕軌的名稱不對");
+  const r = await run(["--no-warnings", "--no-playlist", "--skip-download", "--write-auto-subs", "--sub-langs", track, "--sub-format", "json3",
+    "-o", path.join(dir, "auto-captions.%(ext)s"), "--", ytTarget(id)], { signal });
+  if (signal?.aborted) throw new Error("cancelled");
+  if (r.code !== 0) throw new Error(`自動字幕抓不下來：${lastError(r)}`);
+  const f = fs.readdirSync(dir).map((n) => path.join(dir, n)).find((p) => /^auto-captions\..+\.json3$/.test(path.basename(p)));
+  if (!f) throw new Error("自動字幕抓不下來：找不到字幕檔");
+  return f;
+}
+
+// 只下載音軌（不下載影片），放進呼叫的人給的暫存資料夾，辨識完跟著資料夾刪掉
+export async function fetchAudio(id, dir, { run = runYtDlp, signal, onProgress = () => {} } = {}) {
+  let final = "";
+  const r = await run([
+    "--no-warnings", "--no-playlist", "--newline", "--progress",
+    "-f", "bestaudio[ext=m4a]/bestaudio",
+    "--progress-template", "download:PROG %(progress.downloaded_bytes)s %(progress.total_bytes)s %(progress.total_bytes_estimate)s",
+    "--print", "after_move:FILE %(filepath)s",
+    "-o", path.join(dir, "audio.%(ext)s"), "--", ytTarget(id),
+  ], {
+    signal,
+    onLine: (line) => {
+      const m = /^PROG (\d+) (\S+) (\S+)/.exec(line);
+      if (m) { const total = Number(m[2]) || Number(m[3]) || 0; if (total) onProgress(Math.min(0.99, Number(m[1]) / total)); }
+      const f = /^FILE (.+)$/.exec(line);
+      if (f) final = f[1].trim();
+    },
+  });
+  if (signal?.aborted) throw new Error("cancelled");
+  if (r.code !== 0) throw new Error(`音檔下載不下來：${lastError(r)}`);
+  if (!final || !fs.existsSync(final)) throw new Error("音檔下載不下來：找不到下載好的檔案");
   onProgress(1);
   return final;
 }

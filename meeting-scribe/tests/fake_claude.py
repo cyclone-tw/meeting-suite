@@ -1,6 +1,6 @@
 """假的 Claude Code：讀 stream-json 使用者訊息，回 result 事件。給 AgentSession 測試用。
 
-FAKE_MODE=bad → 回非 JSON；badsummary → 只有會後總結回非 JSON；badminutes → 只有會議紀錄回非 JSON；badform → 只有表單（擴充包，例如 IEP 會議紀錄）回非 JSON；badagenda → 只有議程回非 JSON；badcheck → 只有會議中的議程判斷回非 JSON；badnames → 只有 AI 修正（原更正名字）回非 JSON；badmodule → 只有延伸模組回空白；badonce → 只有第一則回非 JSON；die → 讀到第一則就結束；error → result 帶 is_error；limit → 額度用完（is_error＋429）；auth → 登入過期；hang → 讀了不回。
+FAKE_MODE=bad → 回非 JSON；badsummary → 只有會後總結回非 JSON；badminutes → 只有會議紀錄回非 JSON；badform → 只有表單（擴充包，例如 IEP 會議紀錄）回非 JSON；badagenda → 只有議程回非 JSON；badcheck → 只有會議中的議程判斷回非 JSON；badnames → 只有 AI 修正（原更正名字）回非 JSON；badmodule → 只有延伸模組回空白；badask → 只有問 AI 回空白；badonce → 只有第一則回非 JSON；die → 讀到第一則就結束；error → result 帶 is_error；limit → 額度用完（is_error＋429）；auth → 登入過期；hang → 讀了不回。
 收到「整理程序剛重新啟動」的補前文時，摘要前面加「接續：」，測試用來確認有補。
 FAKE_PROMPT_LOG 有設時，每則收到的提示記一行 JSON 字串到那個檔。
 FAKE_DELAY_FILE 指到的檔案存在時，每則回覆前先等檔案裡寫的秒數（e2e 用來模擬整理很慢，#126）；每則都重讀，測試中途可以改。
@@ -45,6 +45,13 @@ for line in sys.stdin:
             {"wrong": "書上", "right": request[-2:]}, {"wrong": "報告", "right": "報吿"}, {"wrong": "不存在的字", "right": "x"}, {"wrong": "書", "right": "學"},
             {"wrong": "學障", "right": "學障生"}, {"wrong": "書上", "right": "別的"}, ["下周", "下週"], {"wrong": 1, "right": "x"}, "壞的",
         ]}, ensure_ascii=False)
+    elif "<question>" in prompt:
+        # 問 AI（#214）：引用逐字稿第一段的時間、帶回問題與有沒有前文，測試確認 prompt 組得對；故意包 ``` 和留「下周」測試固定替換
+        question = prompt.split("<question>\n", 1)[1].split("\n</question>", 1)[0]
+        first = prompt.split("<transcript>\n", 1)[1].split("\n", 1)[0]
+        stamp = first.split("]", 1)[0] + "]" if first.startswith("[") else ""
+        more = "（有前文）" if "<history>" in prompt else ""
+        reply = "" if mode == "badask" else f"```markdown\n會議裡提到書上的學生下周再談 {stamp}。\n\n問題：{question[:30]}{more}\n```"
     elif "<module>" in prompt:
         # 延伸模組（#136）：把指示的第一行與 <role> 帶回來，測試確認選項有換進去；故意包 ``` 和一級標題、留「下周」測試固定替換
         inst = prompt.split("<module>\n", 1)[1].split("\n</module>", 1)[0]

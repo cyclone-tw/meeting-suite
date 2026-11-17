@@ -22,6 +22,38 @@ def git(*args, cwd=None):
                    cwd=cwd, env=env, check=True, capture_output=True)
 
 
+# 學生資料同步是私人環境專用，公開版匯出時排除它的 unit／腳本（#199）；檔案不在就跳過，不讓公開版測試失敗
+HAS_STUDENTS_SYNC = (DEPLOY / "meeting-scribe-students-sync.service.in").exists()
+
+
+class StudentsSyncUnitTest(unittest.TestCase):
+    """#222：學生資料改由 A1 入口同步；不再用 root 的 GitHub 憑證 git pull。"""
+
+    @unittest.skipUnless(HAS_STUDENTS_SYNC, "學生資料同步只在私人版")
+    def test_sync_unit_uses_the_scoped_key_and_no_git_credentials(self):
+        lines = unit_lines(DEPLOY / "meeting-scribe-students-sync.service.in")
+        self.assertIn("Type=oneshot", lines)
+        execs = [ln for ln in lines if ln.startswith("ExecStart=")]
+        self.assertEqual(len(execs), 1)
+        argv = shlex.split(execs[0][len("ExecStart="):])
+        self.assertEqual(argv[:3], ["/usr/bin/python3", "-I", "@REPO@/deploy/wiki-students-sync.py"])
+        self.assertEqual(argv[argv.index("--target") + 1], "@STUDENTS@")
+        self.assertEqual(argv[argv.index("--key") + 1], "/etc/meeting-scribe/wiki-scribe_ed25519")
+        self.assertNotIn("Environment=HOME=/root", lines)
+        self.assertFalse(any("git" in ln for ln in execs))
+
+    @unittest.skipUnless(HAS_STUDENTS_SYNC, "學生資料同步只在私人版")
+    def test_sync_timer_schedule(self):
+        lines = unit_lines(DEPLOY / "meeting-scribe-students-sync.timer.in")
+        for want in ("OnBootSec=2min", "OnUnitActiveSec=15min", "RandomizedDelaySec=60", "WantedBy=timers.target"):
+            self.assertIn(want, lines)
+
+    def test_installer_only_installs_sync_when_configured(self):
+        text = (DEPLOY / "install-linux.sh").read_text(encoding="utf-8")
+        self.assertIn('STUDENTS_DIR="${MEETING_SCRIBE_STUDENTS_DIR:-}"', text)
+        self.assertIn("meeting-scribe-students-sync.service.in", text)
+
+
 class PullUnitTest(unittest.TestCase):
     def test_service_keeps_root_home_and_oneshot(self):
         lines = unit_lines(DEPLOY / "meeting-scribe-wiki-pull.service.in")

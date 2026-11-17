@@ -11,12 +11,19 @@
 //   RecapFiles.extraMarkdown({label, header, markdown})  → 延伸檔的內容
 //   RecapFiles.extraFiles(list, {header, taken})    → [{label, file, markdown}]：list 是 [{label, markdown}]，空的略過；
 //     和 taken（已經有的或要保留的檔名，不分大小寫）或彼此撞名就加 -2、-3
+//   RecapFiles.askMarkdown({header, items})        → ask.md：問 AI 的對話（items：[{q, a}]，#214）；沒有問答回 ""
+//   RecapFiles.askBody(items)                       → 同上但沒有檔案標題與表頭，每題「## 編號. 問題」（給完整紀錄當一節）
+//   RecapFiles.subtitleCues(segs)                   → [{start, end, speaker, text}]（#215）：segs 是 [{start, speaker, text}]，
+//     沒有時間的句子略過；結束時間＝下一句開始，最長照字數估（每字 220 ms，1～7 秒）
+//   RecapFiles.srt(segs)／RecapFiles.vtt(segs)      → 字幕檔；VTT 有講者時用 <v 講者 N> 標
+//   RecapFiles.documentMarkdown({title, header, sections})  → 完整紀錄（#215）：sections 是 [{title, markdown}]，空的略過，
+//     內容的標題往下降一級
 //   RecapFiles.parseTranscript(text)                → [{start, speaker, text}]：讀回逐字稿檔，交給 AI 重新整理（#174）
 //     本 App 的 transcript.txt（或 summary.md 的逐字稿段）讀【原始逐字稿】的「[講者 N]」與「[時:分:秒] 句子」；
 //     SRT／VTT 每則字幕一句、留開始時間；其他純文字／Markdown 每行一句、太長的在句尾切開，沒有時間（start 是 null）
 (function () {
   "use strict";
-  const VERSION = "1.1.0";
+  const VERSION = "1.3.0";
 
   const fmtHms = (ms) => {
     if (ms == null || !Number.isFinite(Number(ms))) return "--:--:--";
@@ -64,6 +71,51 @@
       out.push({ label: x.label, file, markdown: extraMarkdown({ label: x.label, header, markdown: x.markdown }) });
     }
     return out;
+  }
+
+  // 問 AI（#214）：每題一個「## 編號. 問題」（問題壓成一行、最多 120 字），回答的標題往下降一級
+  function askBody(items) {
+    const list = (Array.isArray(items) ? items : []).filter((x) => x && String(x.q ?? "").trim() && String(x.a ?? "").trim());
+    const title = (q) => { const t = Array.from(String(q).replace(/\s+/g, " ").trim()); return t.length > 120 ? t.slice(0, 120).join("") + "…" : t.join(""); };
+    return list.map((x, i) => `## ${i + 1}. ${title(x.q)}\n\n${demote(String(x.a).trim())}\n`).join("\n");
+  }
+  function askMarkdown({ header = [], items = [] } = {}) {
+    const body = askBody(items);
+    return body ? `# 問 AI\n\n${headBlock(header)}` + body : "";   // 不翻：存檔內容
+  }
+
+  // ---- 字幕（#215）：逐字稿每句只有開始時間，結束時間用下一句的開始，最長照字數估 ----
+  const CUE_MS_PER_CHAR = 220, CUE_MIN = 1000, CUE_MAX = 7000;
+  function subtitleCues(segs) {
+    const list = (Array.isArray(segs) ? segs : [])
+      .filter((x) => x && Number.isFinite(Number(x.start)) && x.start !== null && String(x.text ?? "").trim())
+      .map((x) => ({ start: Math.max(0, Math.round(Number(x.start))), speaker: x.speaker == null || x.speaker === "" ? null : String(x.speaker), text: String(x.text).replace(/\s*\n\s*/g, " ").trim() }))
+      .sort((a, b) => a.start - b.start);
+    return list.map((c, i) => {
+      const guess = c.start + Math.min(CUE_MAX, Math.max(CUE_MIN, Array.from(c.text).length * CUE_MS_PER_CHAR));
+      const next = list[i + 1]?.start;
+      const end = next > c.start ? Math.min(next, guess) : guess;   // 下一句同一個時間開始（或沒有下一句）：照字數估
+      return { ...c, end };
+    });
+  }
+  const cueTime = (ms, sep) => {
+    const t = Math.max(0, Math.round(ms));
+    return `${fmtHms(t)}${sep}${String(t % 1000).padStart(3, "0")}`;
+  };
+  function srt(segs) {
+    return subtitleCues(segs).map((c, i) => `${i + 1}\n${cueTime(c.start, ",")} --> ${cueTime(c.end, ",")}\n${c.text}\n`).join("\n");
+  }
+  const vttEsc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  function vtt(segs) {
+    const cues = subtitleCues(segs).map((c) => `${cueTime(c.start, ".")} --> ${cueTime(c.end, ".")}\n${c.speaker ? `<v 講者 ${vttEsc(c.speaker)}>` : ""}${vttEsc(c.text)}\n`);   // 不翻：字幕檔內容
+    return `WEBVTT\n\n${cues.join("\n")}`;
+  }
+
+  // ---- 完整紀錄（#215）：Markdown、Word、PDF 共用同一份內容 ----
+  function documentMarkdown({ title, header = [], sections = [] } = {}) {
+    const parts = (Array.isArray(sections) ? sections : []).filter((x) => x && String(x.markdown ?? "").trim())
+      .map((x) => `## ${String(x.title ?? "")}\n\n${demote(String(x.markdown).trim())}\n`);
+    return `# ${String(title ?? "") || "會議紀錄"}\n\n${headBlock(header)}${parts.join("\n")}`;   // 不翻：存檔內容
   }
 
   // ---- 讀回逐字稿（#174）----
@@ -117,7 +169,7 @@
     return out;
   }
 
-  const api = Object.freeze({ version: VERSION, fmtHms, headerLines, introText, summaryMarkdown, extraFileName, extraMarkdown, extraFiles, parseTranscript });
+  const api = Object.freeze({ version: VERSION, fmtHms, headerLines, introText, summaryMarkdown, extraFileName, extraMarkdown, extraFiles, askMarkdown, askBody, subtitleCues, srt, vtt, documentMarkdown, parseTranscript });
   if (typeof module === "object" && module && module.exports) module.exports = api;
   if (typeof window !== "undefined") window.RecapFiles = Object.freeze(api);
 })();

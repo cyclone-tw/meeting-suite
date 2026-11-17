@@ -211,7 +211,7 @@ function ytCounts() {
 function ytPlan() {
   const p = state.p, outs = p.outputs || {}, cuts = state.cuts;
   let how;
-  if (p.source?.captions === "none") {
+  if (p.plain) {
     // 不要字幕（#158）：沒有字幕可燒也沒有字幕可掛
     how = !cuts.length ? _("直接上傳原始影片，不加字幕。") : outs.cut && outs.cut.cuts === cutsKeyOf(cuts) ? _("用已經輸出的剪接版上傳，不加字幕。") : _("會先輸出剪接好的影片（不燒字幕，要花幾分鐘），再上傳，不加字幕。");
   } else if (ytSubsMode === "burned") {
@@ -243,7 +243,7 @@ async function openYoutube() {
     const sug = state.p.youtube_suggest;
     const sugNewer = sug?.title && (!last?.title || Date.parse(sug.created || 0) > Date.parse(last.started || 0));
     $("#ytTitle").value = (sugNewer ? sug.title : last?.title) || state.p.name;
-    const plain = state.p.source?.captions === "none";   // 不要字幕（#158）：不選字幕模式，也不用補 CC
+    const plain = Boolean(state.p.plain);   // 不要字幕（#158）：不選字幕模式，也不用補 CC
     $("#ytSubsField").hidden = plain;
     $("#ytDesc").value = cutOps.remapDescription(state.desc, state.cuts);
     if (ytChannelObj()) applyChannelDefaults(ytChannelObj());

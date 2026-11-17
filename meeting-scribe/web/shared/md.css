@@ -20,6 +20,13 @@
 .md-view .md-table { border-collapse:collapse; font-size:.95em; min-width:50%; }
 .md-view .md-table th, .md-view .md-table td { border:1px solid var(--line, rgba(127,127,127,.3)); padding:5px 9px; vertical-align:top; }
 .md-view .md-table th { background:var(--surface-2, rgba(127,127,127,.1)); font-weight:600; }
+/* 標題與內文用顏色分層（meeting-scribe#220）：主標題（# ##）用主色，副標題（### 以下）與粗體用藍色，內文不變。
+   light-dark() 依頁面的 color-scheme 選亮／暗色（兩個 App 都有設，列印強制亮色）；不支援的瀏覽器退回前一行。
+   兩組藍色在各自背景的對比都在 5.8:1 以上 */
+.md-view .md-h1, .md-view .md-h2 { color:var(--accent, inherit); }
+.md-view .md-h1 { padding-bottom:.25em; border-bottom:1px solid color-mix(in srgb, var(--accent, currentColor) 35%, transparent); }
+.md-view .md-h3, .md-view .md-h4, .md-view .md-h5, .md-view .md-h6, .md-view strong { color:var(--accent, inherit); color:light-dark(#2c5b9e, #93b8e8); }
+.md-view .md-h strong, .md-view .md-link strong { color:inherit; }
 /* 首尾不留白：放最後、加重 specificity，蓋過上面各區塊的 margin */
 .md-view > :first-child:first-child { margin-top:0; }
 .md-view > :last-child:last-child { margin-bottom:0; }

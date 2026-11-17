@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { wikiGetContent } from "./wiki-cli.mjs";
 
 // Literal {wrong: right} vocabulary for transcripts.
 //
@@ -168,14 +169,99 @@ export function classifyZeroTypeCandidates({
   return result;
 }
 
-// ---- private vocabulary (a note outside git) ---------------------------------
+// ---- vocabulary notes live in the user's wiki (#197) ---------------------------
 
 // The passwd home, not $HOME: agents that run with their own HOME still find
-// the notes under the account's real home.
+// the wiki tool and the cache under the account's real home.
 // CYCLONE_ASR_OWNER_HOME exists for tests.
 export function ownerHome() {
   return process.env.CYCLONE_ASR_OWNER_HOME || os.userInfo().homedir;
 }
+
+// 兩篇詞彙筆記（共用詞彙表、人名詞彙）都放在使用者的 wiki，wiki 不在這台電腦上：每次透過 wiki 工具讀
+// （lib/wiki-cli.mjs），讀到的存一份在本機。
+//   - NOTE_TTL_MS 之內直接用存的那份，不再問 wiki（一次轉錄會起好幾個程序，每個都要讀）。
+//   - 過了就再問；問不到時，存的那份還在 NOTE_STALE_MS 之內就先用，但一定說它不是最新的。
+//   - 再舊、或從來沒讀到過：詞彙未載入，說出來。轉錄照跑，不因此失敗。
+export const NOTE_TTL_MS = 10 * 60_000;
+export const NOTE_STALE_MS = 7 * 24 * 3600_000;
+
+export function noteCacheDir(home = ownerHome()) {
+  return path.join(home, "Library", "Caches", "recording-transcriber", "vocabulary");
+}
+
+// 換了工具或換了筆記就是另一份：別支工具存的不能拿來用
+const cacheFile = (dir, { bin, note }) => path.join(dir, `${createHash("sha256").update(`${bin}\0${note}`).digest("hex").slice(0, 24)}.json`);
+
+function readCache(file, source) {
+  try {
+    const j = JSON.parse(fs.readFileSync(file, "utf8"));
+    const at = Date.parse(j?.fetched_at);
+    return j?.note === source.note && typeof j.raw === "string" && Number.isFinite(at) ? { raw: j.raw, at } : null;
+  } catch {
+    return null;
+  }
+}
+
+// 存不了（磁碟滿、資料夾不能寫）不影響這次：讀到的照用，下次再問 wiki
+function writeCache(file, source, raw, now) {
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ version: 1, note: source.note, fetched_at: new Date(now).toISOString(), raw }), { mode: 0o600 });
+    fs.renameSync(tmp, file);
+  } catch { /* 見上 */ }
+}
+
+export function dropNoteCache({ note, bin, cacheDir = noteCacheDir() }) {
+  fs.rmSync(cacheFile(cacheDir, { bin, note }), { force: true });
+}
+
+// 回傳 { state: "fresh" | "cached", raw, ageMs }、{ state: "stale", raw, ageMs, reason }（問不到、用舊的）
+// 或 { state: "unavailable", reason }
+export function readWikiNote({ note, bin, cacheDir = noteCacheDir(), now = Date.now(), ttlMs = NOTE_TTL_MS, staleMs = NOTE_STALE_MS, timeoutMs, env, get = wikiGetContent }) {
+  const file = cacheFile(cacheDir, { bin, note });
+  const cached = readCache(file, { note });
+  const age = cached ? now - cached.at : Infinity;
+  if (cached && age >= 0 && age < ttlMs) return { state: "cached", raw: cached.raw, ageMs: age };
+  const r = get(bin, note, { ...(timeoutMs ? { timeoutMs } : {}), ...(env ? { env } : {}) });
+  // 成功卻沒有內容不算讀到（不存起來，免得接下來十分鐘都當成一篇空的筆記）
+  if (r.ok && r.stdout.trim()) {
+    writeCache(file, { note }, r.stdout, now);
+    return { state: "fresh", raw: r.stdout, ageMs: 0 };
+  }
+  const reason = r.ok ? "wiki 工具沒有回內容" : r.reason;
+  if (cached && age >= 0 && age <= staleMs) return { state: "stale", raw: cached.raw, ageMs: age, reason };
+  return { state: "unavailable", reason };
+}
+
+function ageText(ms) {
+  const minutes = Math.max(1, Math.round(ms / 60_000));
+  if (minutes < 60) return `${minutes} 分鐘`;
+  return minutes < 48 * 60 ? `${Math.round(minutes / 60)} 小時` : `${Math.round(minutes / 1440)} 天`;
+}
+
+// source 是個人設定算出來的（lib/asr-profile.mjs 的 vocabularySource）：null＝沒設定（不出聲）；
+// { problem }＝設定了但不能用；{ note, bin }＝從 wiki 讀。
+// 回傳 { state: "absent" | "unavailable" } 或 { state: "loaded" | "stale", raw, ageMs }。提示只說哪一篇、為什麼，不印筆記內容
+function loadNote(label, source, { warn = defaultWarn, ...opts }) {
+  if (!source) return { state: "absent" };
+  if (source.problem) {
+    warn(`[vocabulary] 詞彙未載入：${label}（${source.problem}）`);
+    return { state: "unavailable" };
+  }
+  const r = readWikiNote({ ...opts, note: source.note, bin: source.bin });
+  if (r.state === "unavailable") {
+    warn(`[vocabulary] 詞彙未載入：${label}讀不到（${r.reason}）`);
+    return { state: "unavailable" };
+  }
+  if (r.state === "stale") warn(`[vocabulary] ${label}不是最新的：這次讀不到（${r.reason}），先用 ${ageText(r.ageMs)}前存的那一份`);
+  return { state: r.state === "stale" ? "stale" : "loaded", raw: r.raw, ageMs: r.ageMs };
+}
+
+const sha256Of = (raw) => createHash("sha256").update(raw).digest("hex");
+
+// ---- private vocabulary (names of people) ---------------------------------------
 
 // Hand-edited keys: a blank key would rewrite every space, so trim and drop.
 function trimKeys(map) {
@@ -204,45 +290,18 @@ export function parsePrivateVocabulary(markdown) {
   };
 }
 
-const ABSENT = Object.freeze({ vocabulary: {}, skip: [], path: "", sha256: "absent" });
-
-// `paths` are relative to the owner home and tried in order; the first file
-// that exists is read. A missing file is normal (the other host may not have
-// synced yet) and is silent. Returns { raw, file, rel } or null.
-function* noteCandidates({ home, paths }) {
-  const base = path.resolve(home);
-  for (const rel of paths) {
-    if (typeof rel !== "string" || !rel || path.isAbsolute(rel)) continue;
-    const file = path.resolve(base, rel);
-    if (!file.startsWith(base + path.sep)) continue;
-    try {
-      yield { raw: fs.readFileSync(file, "utf8"), file, rel };
-    } catch {
-      continue;
-    }
-  }
-}
-
-function readFirstNote({ home, paths }) {
-  for (const note of noteCandidates({ home, paths })) return note;
-  return null;
-}
-
-// A broken file warns once and is ignored so a transcript run never fails on it.
-export function loadPrivateVocabulary({ home = ownerHome(), paths = [], warn = defaultWarn } = {}) {
-  const note = readFirstNote({ home, paths });
-  if (!note) return { ...ABSENT };
+// state：absent（沒設定）、loaded、stale（wiki 讀不到，用舊的）、unavailable（沒讀到）、invalid（讀到了但看不懂）。
+// sha256 是筆記內容的雜湊；沒有內容時就是 state 那個字
+export function loadPrivateVocabulary({ source = null, warn = defaultWarn, ...opts } = {}) {
+  const empty = (state) => ({ vocabulary: {}, skip: [], path: "", sha256: state, state });
+  const note = loadNote("人名詞彙", source, { warn, ...opts });
+  if (note.raw === undefined) return empty(note.state);
   const parsed = parsePrivateVocabulary(note.raw);
   if (parsed.error) {
-    warn(`[vocabulary] ignoring private vocabulary ${note.rel}: ${parsed.error}`);
-    return { ...ABSENT, sha256: "invalid" };
+    warn(`[vocabulary] 詞彙未載入：人名詞彙的格式看不懂（${parsed.error.replace(/: .*$/s, "")}）`);
+    return empty("invalid");
   }
-  return {
-    vocabulary: parsed.vocabulary,
-    skip: parsed.skip,
-    path: note.file,
-    sha256: createHash("sha256").update(note.raw).digest("hex"),
-  };
+  return { vocabulary: parsed.vocabulary, skip: parsed.skip, path: source.note, sha256: sha256Of(note.raw), state: note.state, ageMs: note.ageMs };
 }
 
 // ---- shared transcription vocabulary (meeting-scribe#137, #84) ------------------
@@ -300,23 +359,18 @@ export function parseSharedVocabulary(markdown) {
   return out;
 }
 
-const SHARED_ABSENT = Object.freeze({ terms: [], fixed: {}, dictation: {}, hints: [], path: "", sha256: "absent" });
-
-export function loadSharedVocabulary({ home = ownerHome(), paths = [], warn = defaultWarn } = {}) {
-  let invalid = false;
-  for (const note of noteCandidates({ home, paths })) {
-    const parsed = parseSharedVocabulary(note.raw);
-    if (parsed.error) {
-      // 壞的那份（例如搜尋副本）不擋住後面好的那份（checkout）
-      warn(`[vocabulary] ignoring shared vocabulary ${note.rel}: ${parsed.error}`);
-      invalid = true;
-      continue;
-    }
-    if (parsed.dropped) warn(`[vocabulary] shared vocabulary ${note.rel}: skipped ${parsed.dropped} unusable line(s)`);
-    const { dropped, ...rest } = parsed;
-    return { ...rest, path: note.file, sha256: createHash("sha256").update(note.raw).digest("hex") };
+export function loadSharedVocabulary({ source = null, warn = defaultWarn, ...opts } = {}) {
+  const empty = (state) => ({ terms: [], fixed: {}, dictation: {}, hints: [], path: "", sha256: state, state });
+  const note = loadNote("共用詞彙表", source, { warn, ...opts });
+  if (note.raw === undefined) return empty(note.state);
+  const parsed = parseSharedVocabulary(note.raw);
+  if (parsed.error) {
+    warn(`[vocabulary] 詞彙未載入：共用詞彙表的格式看不懂（${parsed.error}）`);
+    return empty("invalid");
   }
-  return { ...SHARED_ABSENT, ...(invalid ? { sha256: "invalid" } : {}) };
+  if (parsed.dropped) warn(`[vocabulary] shared vocabulary ${source.note}: skipped ${parsed.dropped} unusable line(s)`);
+  const { dropped, ...rest } = parsed;
+  return { ...rest, path: source.note, sha256: sha256Of(note.raw), state: note.state, ageMs: note.ageMs };
 }
 
 function defaultWarn(message) {

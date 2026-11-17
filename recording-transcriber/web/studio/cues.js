@@ -431,6 +431,7 @@ function tick() {
   const ms = video.currentTime * 1000;
   if (stopAt !== null && video.currentTime >= stopAt) { video.pause(); stopAt = null; }
   $("#timeNow").textContent = `${ops.fmtTime(ms, true)} / ${ops.fmtTime((video.duration || 0) * 1000)}`;
+  showChapNow(ms);
   if (video.duration && document.activeElement !== $("#scrub")) $("#scrub").value = String(Math.round((video.currentTime / video.duration) * 1000));
   const idx = ops.cueIndexAt(state.cues, ms);
   const gap = idx === -1 && video.paused && video.readyState > 0 && state.cues.length > 0;   // 和 showCue 的空檔條件一致
@@ -460,6 +461,7 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "ArrowDown") { e.preventDefault(); select(state.sel + 1); }
   else if (e.key === "Enter") { e.preventDefault(); $("#cueText").focus(); }
   else if (e.key.toLowerCase() === "p") { e.preventDefault(); playCue(); }
+  else if (state.p?.linked) return;   // YouTube 連結沒有本機影片，不能剪（#181）
   else if (e.key.toLowerCase() === "i") eMarkIn();
   else if (e.key.toLowerCase() === "o") eMarkOut();
   else if (e.key.toLowerCase() === "x") eCutSelection();
@@ -536,6 +538,7 @@ async function rewriteDescription() {
     state.desc = r.description;
     $("#descText").value = state.desc;
     descCount();
+    renderChapters();   // 新的章節畫到時間軸上（#170）
     if (state.p) state.p.youtube_suggest = r.youtube_suggest;
     toast(_("說明欄寫好了{note}。上傳 YouTube 時也會帶入新的名稱和標籤建議。", { note: r.chapters >= 3 ? _("，共 {n} 章", { n: r.chapters }) : "" }), [], 6000);
   } catch (e) {

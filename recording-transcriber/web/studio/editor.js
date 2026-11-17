@@ -6,17 +6,24 @@
 
 // ---- 專案 ----
 const state = { id: "", p: null, cues: [], cuts: [], rev: 0, sel: -1, play: -1, filter: "all", undo: [], size: "medium", style: "box", fps: 30, corr: null, editBefore: null, desc: "",
-  foreign: false, langMode: "both", trBefore: null, trSeen: new Map() };
-const video = $("#video");
+  foreign: false, langMode: "both", trBefore: null, trSeen: new Map(), chaps: [] };
+const video = makePlayer($("#video"), $("#ytFrame"));   // 本機影片或 YouTube 嵌入（player.js，#181）
 let pollTimer = 0;
 
-async function openProject(id) {
+// quiet：開機時自動打開上次的專案（#184），專案不見了就默默回到空狀態，不跳錯誤
+async function openProject(id, { quiet = false } = {}) {
   clearTimeout(pollTimer);
   state.id = id;
   let p;
-  try { p = await api(`/api/projects/${id}`); } catch (e) { if (state.id === id) { showAlert(e.message); showHome(); } return; }
+  try { p = await api(`/api/projects/${id}`); } catch (e) {
+    if (state.id !== id) return;
+    if (quiet) layoutSet(LAYOUT_KEYS.last, null); else showAlert(e.message);
+    showHome();
+    return;
+  }
   if (state.id !== id) return;   // 等回應時已經回首頁或開了別的專案
   state.p = p;
+  layoutSet(LAYOUT_KEYS.last, id);
   history.replaceState(null, "", `#${id}`);
   $("#projName").textContent = p.name;
   $("#privBadge").hidden = p.privacy === "public";
@@ -44,7 +51,7 @@ function showProcessing(p) {
     const k = STEP_ORDER.indexOf(li.dataset.k);
     // Discord 分軌（#129）的步驟只在有分軌時出現；補聲音只在真的有人沒錄到時出現
     const kk = li.dataset.k;
-    li.hidden = (kk === "preview" && step !== "preview") || ((kk === "tracks" || kk === "speakers") && !p.tracks)
+    li.hidden = (kk === "preview" && step !== "preview") || ((kk === "tracks" || kk === "speakers") && !p.tracks) || (kk === "audio" && !(p.linked && p.source?.captions === "soniox"))
       || (kk === "fill" && step !== "fill" && !(p.tracks?.filled || []).length);
     li.classList.toggle("now", !failed && k === at);
     li.classList.toggle("done", !failed && at > k);
@@ -146,14 +153,17 @@ function showEditor(p) {
   renderModules();
   renderMind(true);
   renderDrive();
-  const src = `/api/projects/${state.id}/video?t=${TOKEN}`;
-  if (video.getAttribute("src") !== src) video.src = src;
+  if (p.embed) video.useYouTube(p.embed.id, p.duration_ms || 0);   // YouTube 連結：嵌入播放，沒有本機檔（#181）
+  else video.useFile(`/api/projects/${state.id}/video?t=${TOKEN}`);
   document.documentElement.style.setProperty("--fs", SIZE_PX[state.size]);
   $("#overlay").classList.toggle("box", state.style === "box");
   showLang(p);
   renderList();
   select(0, false);
   openEditorTimeline(p);
+  enterLayout();   // 三欄版面、左欄專案清單、時間軸章節（#170）
+  askReset();      // Ask AI 換成這支影片的對話（#171）
+  notesReset();    // 學習筆記換成這支影片的（#172）
   aiChecked.clear();
   for (const x of p.suggestions?.items || []) aiChecked.add(x.id);
   renderAi(p);
@@ -162,11 +172,24 @@ function showEditor(p) {
   loadCorr();
   if (p.burn?.status === "running") openBurn();
   showPlain(p);
+  showLinked(p);
+}
+
+// YouTube 連結專案（#181）：沒有本機影片，剪輯、燒字幕、短片、上傳、AI 剪輯都藏起來（伺服器也會擋）
+function showLinked(p) {
+  const linked = Boolean(p.linked), was = document.documentElement.classList.contains("linked");
+  document.documentElement.classList.toggle("linked", linked);
+  $("#burnOpen").hidden = linked;
+  $("#ytOpen").hidden = linked;
+  // 連結專案的「重新處理」＝只抓音檔用 Soniox 重新辨識（#182）；本來就是 Soniox 的會用存著的辨識結果
+  $("#reprocBtn").textContent = linked && p.source?.captions !== "soniox" ? _("改用 Soniox 重新辨識…") : _("重新處理這支影片…");
+  if (linked && $('.tabs button[data-tab="aiPane"]').getAttribute("aria-selected") === "true") $("#tabCues").click();
+  if (!linked && was) renderECuts();
 }
 
 // 不要字幕的專案（#158）：只留影片、時間軸剪輯與說明欄，字幕相關的畫面藏起來
 function showPlain(p) {
-  const plain = p.source?.captions === "none", was = document.documentElement.classList.contains("no-subs");
+  const plain = Boolean(p.plain), was = document.documentElement.classList.contains("no-subs");   // 伺服器判斷（#173）
   document.documentElement.classList.toggle("no-subs", plain);
   $("#descHint").hidden = plain;
   $("#descPlainHint").hidden = !plain;
@@ -274,6 +297,7 @@ function footNote(r) {
   if (r.soniox?.audio_ms) parts.push(_("Soniox {min} 分鐘 ≈ NT${cost}", { min: (r.soniox.audio_ms / 60000).toFixed(1), cost: (r.soniox.cost_usd * 32).toFixed(1) }));
   if (r.claude?.calls) parts.push(r.proofreader === "claude" ? _("Claude {n} 次（訂閱，API 等值 NT${cost}）", { n: r.claude.calls, cost: (r.claude.cost_usd * 32).toFixed(1) }) : _("{name} {n} 次", { name: r.proofreader, n: r.claude.calls }));
   if (r.corrections) parts.push(_("錯字表 {n} 組{note}", { n: r.corrections.hints + r.corrections.fixed, note: r.corrections.source === "cache" ? _("（mini 連不上，用本機快取）") : "" }));
+  if (r.vocabulary) parts.push(r.vocabulary === "stale" ? _("詞彙表不是最新的（wiki 連不上，用之前存的）") : _("詞彙未載入（wiki 讀不到詞彙表）"));
   if (pCuts().length) parts.push(_("剪掉 {n} 段（紅色），燒字幕時一起剪掉", { n: pCuts().length }));
   $("#listFoot").textContent = parts.join(" · ");
 }
@@ -290,7 +314,12 @@ function fitStage() {
 new ResizeObserver(fitStage).observe($("#stageWrap"));
 window.addEventListener("resize", fitStage);
 video.addEventListener("loadedmetadata", () => { fitStage(); renderScrubCuts(); tick(); });
-video.addEventListener("error", () => { if (state.id && !$("#editor").hidden) showAlert(_("影片播不了：原始影片可能被移動、刪除，或格式瀏覽器不支援。")); });
+video.addEventListener("error", () => {
+  if (!state.id || $("#editor").hidden) return;
+  // YouTube 嵌入的錯誤碼：101、150 是作者不允許嵌入；100 是影片不見或設成私人
+  if (video.mode === "yt") showAlert([101, 150].includes(video.ytError) ? _("作者不允許在別的網站播放這支影片；請改用「下載影片」匯入。") : video.ytError === 100 ? _("YouTube 上找不到這支影片（可能被刪除或設成私人）。") : _("YouTube 嵌入播放器出了問題，請重新整理再試。"));
+  else showAlert(_("影片播不了：原始影片可能被移動、刪除，或格式瀏覽器不支援。"));
+});
 
 // ---- 編輯頁的時間軸與剪輯（#5）----
 const ed = { selIn: null, selOut: null, picked: -1, ac: null };
@@ -310,6 +339,8 @@ function openEditorTimeline(p) {
   $("#eZoomLabel").textContent = _("整支");
   $("#etlEnd").textContent = ops.fmtTime(eDur());
   renderECuts();
+  // YouTube 連結沒有本機影片：沒有縮圖和波形，章節、筆記旗子、點一下跳過去照常（#181）
+  if (p.linked) { etl.setWave({ bucket_ms: 1000, peaks: new Uint8Array(0), note: _("YouTube 連結沒有縮圖和聲音波形") }); return; }
   const id = p.id, signal = ed.ac.signal;
   streamTiles(`/api/projects/${id}/thumbs`, signal, (tile) => etl.addTile(tile));
   fetch(`/api/projects/${id}/wave`, { headers: { "X-Studio-Token": TOKEN }, signal }).then((r) => r.json()).then((w) => {

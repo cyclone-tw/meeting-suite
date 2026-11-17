@@ -130,6 +130,7 @@ async function makeRecap() {
     const r = await post(`/api/projects/${id}/recap`);
     if (state.id !== id) return;
     state.p = { ...state.p, recap: r.recap, ...(r.drive !== undefined ? { drive: r.drive } : {}) };
+    renderChapters();   // 說明欄沒有章節時，時間軸改用會後總結的章節（#170）
     pollDrive();
     recapView = "intro";
     toast(r.recap.chapters?.length ? _("會後總結好了，共 {n} 章。", { n: r.recap.chapters.length }) : _("會後總結好了。"), [], 5000);
@@ -158,7 +159,7 @@ async function refreshRecap() {
   const id = state.id;
   if (!modList) loadModules();
   try { await flushSave(); const p = await api(`/api/projects/${id}`); if (state.id === id) state.p = { ...state.p, recap: p.recap, modules: p.modules, drive: p.drive }; } catch { /* 下次再說 */ }
-  if (state.id === id) { renderRecap(); renderModules(); renderMind(); renderDrive(); pollDrive(); }
+  if (state.id === id) { renderRecap(); renderModules(); renderMind(); renderDrive(); pollDrive(); renderChapters(); }
 }
 
 $("#recapSeg").onclick = (e) => {

@@ -257,6 +257,38 @@ if (UI_LANG === "en") { document.documentElement.classList.add("i18n-wait"); set
   #after h2 { margin:0 0 4px; font-size:18px; }
   #afterMeta { margin:0 0 12px; font-size:14px; color:var(--muted); }
   .after-actions { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:4px; }
+  /* 匯出選單（#215）：按「匯出」在按鈕下方展開 */
+  .export-wrap { position:relative; display:inline-flex; }
+  #exportMenu { position:absolute; top:calc(100% + 6px); left:0; z-index:30; min-width:250px; padding:6px; background:var(--surface); border:1px solid var(--line); border-radius:12px; box-shadow:0 8px 24px rgba(0,0,0,.16); display:grid; gap:2px; }
+  #exportMenu[hidden] { display:none; }
+  #exportMenu button { text-align:left; min-height:40px; padding:6px 12px; border:0; border-radius:8px; background:transparent; color:var(--fg); font-size:15px; cursor:pointer; }
+  #exportMenu button:hover, #exportMenu button:focus-visible { background:var(--surface-2); outline:none; }
+  #exportMenu button:disabled { opacity:.45; cursor:default; }
+  #exportMenu .sep { height:1px; background:var(--line); margin:4px 4px; }
+  #exportNote { margin:6px 0 0; }
+  #exportNote.err { color:var(--warn); }
+  /* 完整紀錄存 PDF（#215）：列印時只印 #printDoc，白底黑字、A4 */
+  #printDoc { display:none; }
+  @media print {
+    @page { size:A4; margin:18mm 16mm; }
+    /* 暗色主題的 color-scheme 會把頁邊（@page margin）塗成深色：列印一律亮色 */
+    :root, :root[data-theme] { color-scheme:light !important; background:#fff !important; }
+    body.printing { background:#fff !important; padding:0 !important; }
+    body.printing > *:not(#printDoc) { display:none !important; }
+    body.printing #printDoc { display:block !important; color:#111; font-size:11pt; line-height:1.6; }
+    #printDoc * { background:transparent !important; color:inherit; }
+    #printDoc h1 { font-size:20pt; margin:0 0 10pt; }
+    #printDoc h2 { font-size:15pt; margin:18pt 0 6pt; color:#1f5f4a !important; break-after:avoid; }
+    #printDoc h3 { font-size:12.5pt; margin:12pt 0 4pt; break-after:avoid; }
+    #printDoc h4, #printDoc h5, #printDoc h6 { font-size:11.5pt; margin:10pt 0 4pt; break-after:avoid; }
+    #printDoc p { margin:0 0 5pt; }
+    #printDoc ul, #printDoc ol { margin:0 0 6pt; padding-left:18pt; }
+    #printDoc table { border-collapse:collapse; width:100%; margin:4pt 0 8pt; break-inside:avoid; }
+    #printDoc th, #printDoc td { border:1px solid #999; padding:3pt 6pt; text-align:left; vertical-align:top; }
+    #printDoc th { background:#efefea !important; font-weight:700; }
+    #printDoc pre { white-space:pre-wrap; font-size:9.5pt; background:#f3f3f0 !important; padding:6pt; }
+    #printDoc a { color:inherit; }
+  }
   #savePanel { margin:14px 0 0; padding-bottom:14px; display:grid; gap:10px; }
   #savePanel h3 { margin:0; }
   #usageNote { margin:12px 0 0; font-variant-numeric:tabular-nums; }
@@ -340,6 +372,25 @@ if (UI_LANG === "en") { document.documentElement.classList.add("i18n-wait"); set
   #sumBody p { margin:0 0 6px; }
   #sumBody .pre { white-space:pre-wrap; }
   #minBox, #mapBox, #formBox { margin:20px 0 0; padding-bottom:10px; }
+  /* 問 AI（#214）：一問一答往下排，問題靠右淡底，回答照 Markdown 排；時間點是按鈕，按了跳到逐字稿 */
+  #askBox { padding-bottom:10px; }
+  #askStarters { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 10px; }
+  #askStarters button { min-height:34px; font-size:14px; padding:4px 10px; border-radius:16px; border:1px solid var(--line); background:var(--surface); color:var(--fg); cursor:pointer; text-align:left; }
+  #askStarters button:disabled { opacity:.5; cursor:default; }
+  .ask-item { margin:0 0 14px; }
+  .ask-q { margin:0 0 6px 18%; padding:8px 12px; border-radius:12px; background:var(--surface-2); white-space:pre-wrap; overflow-wrap:anywhere; }
+  .ask-a { padding:2px 0; overflow-wrap:anywhere; }
+  .ask-a h4 { margin:10px 0 4px; font-size:15px; color:var(--doc); }
+  .ask-a h5 { margin:8px 0 2px; font-size:14px; }
+  .ask-a ul, .ask-a ol { margin:0 0 6px; padding-left:20px; }
+  .ask-a p { margin:0 0 6px; }
+  .ask-a.wait { color:var(--muted); }
+  .ask-t { font:inherit; font-size:13px; font-variant-numeric:tabular-nums; padding:0 4px; margin:0 1px; border:1px solid var(--doc-line); border-radius:6px; background:var(--surface); color:var(--doc); cursor:pointer; }
+  .ask-t:hover { border-color:var(--doc); }
+  .ask-act { display:flex; gap:6px; }
+  .ask-act button { min-height:30px; font-size:13px; padding:2px 10px; border-radius:8px; border:1px solid var(--line); background:var(--surface); cursor:pointer; }
+  #askForm textarea { width:100%; box-sizing:border-box; min-height:64px; resize:vertical; border:1px solid var(--line); border-radius:10px; padding:8px 10px; font:inherit; color:inherit; margin:0 0 6px; }
+  #askKeys { margin:0; font-size:12px; }
   /* 會議議程（#97）：開會前準備（設定畫面）、開會時勾選（側欄「議程」頁籤） */
   .blk-opt { font-size:13px; font-weight:400; color:var(--muted); margin-left:4px; }
   .ag-ctl { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:6px; }
@@ -636,9 +687,21 @@ if (UI_LANG === "en") { document.documentElement.classList.add("i18n-wait"); set
       <button id="afterSum" class="btn">看會後總結與會議紀錄</button>
       <button id="contBtn" class="btn" title="同一場會議接著錄（例如中場休息後），逐字稿接在後面">接續錄這場</button>
       <button id="nfOpen2" class="btn" title="名字、講者、專有名詞、聽錯的詞都可以請 AI 修正，整場一起換，存到 Drive 的內容就是改好的">AI 修正</button>
-      <button id="dl" class="btn" disabled><svg class="icon"><use href="#i-dl"/></svg>下載逐字稿</button>
+      <span class="export-wrap">
+        <button id="dl" class="btn" disabled aria-haspopup="menu" aria-expanded="false" aria-controls="exportMenu" title="逐字稿、字幕、完整紀錄（Markdown、Word、PDF）"><svg class="icon"><use href="#i-dl"/></svg>匯出</button>
+        <span id="exportMenu" role="menu" aria-label="匯出格式" hidden>
+          <button type="button" role="menuitem" data-export="txt">逐字稿（.txt）</button>
+          <button type="button" role="menuitem" data-export="srt">字幕（.srt）</button>
+          <button type="button" role="menuitem" data-export="vtt">字幕（.vtt，標出講者）</button>
+          <span class="sep" role="separator"></span>
+          <button type="button" role="menuitem" data-export="md">完整紀錄（Markdown）</button>
+          <button type="button" role="menuitem" data-export="docx">完整紀錄（Word）</button>
+          <button type="button" role="menuitem" data-export="pdf">完整紀錄（PDF，用列印存）</button>
+        </span>
+      </span>
       <button id="discardBtn" class="btn ghost" title="不存到 Drive，這場的逐字稿、AI 整理和錄音全部刪掉" hidden>捨棄這場</button>
     </div>
+    <p id="exportNote" class="help" hidden aria-live="polite"></p>
     <section id="savePanel" class="blk blk-ok" hidden aria-labelledby="saveHead">
       <h3 id="saveHead" class="blk-h"><i data-icon="drive"></i>存到 Drive</h3>
       <label class="field" style="margin:0"><span>會議名稱（資料夾會自動加日期與時間）</span><input type="text" id="saveTitle" class="text-in" placeholder="會議"></label>
@@ -701,6 +764,7 @@ if (UI_LANG === "en") { document.documentElement.classList.add("i18n-wait"); set
     <button role="tab" id="tab-summary" aria-controls="panel-summary" aria-selected="false">總結</button>
     <button role="tab" id="tab-map" aria-controls="panel-map" aria-selected="false" hidden>心智圖</button>
     <button role="tab" id="tab-ext" aria-controls="panel-ext" aria-selected="false" hidden>延伸</button>
+    <button role="tab" id="tab-ask" aria-controls="panel-ask" aria-selected="false" hidden>問 AI</button>
     <button id="sideClose" class="btn ghost" aria-label="收起側邊欄" title="收起側邊欄"><svg class="icon"><use href="#i-close"/></svg></button>
   </div>
   <div class="panel" role="tabpanel" id="panel-agenda" aria-labelledby="tab-agenda" hidden><div class="ag-top"><p class="hint" id="agProgress" aria-live="polite"></p><button type="button" id="agSoon" class="btn">快結束了</button></div><p class="hint" id="agAiNote"></p><ol id="agCheck"></ol></div>
@@ -758,6 +822,18 @@ if (UI_LANG === "en") { document.documentElement.classList.add("i18n-wait"); set
     <section id="modBox" class="blk blk-doc" hidden aria-labelledby="modHead">
       <h3 id="modHead" class="blk-h"><i data-icon="ext"></i>延伸模組</h3>
       <div id="extView"></div>
+    </section>
+  </div>
+  <div class="panel" role="tabpanel" id="panel-ask" aria-labelledby="tab-ask" hidden>
+    <section id="askBox" class="blk blk-doc" aria-labelledby="askHead">
+      <h3 id="askHead" class="blk-h"><i data-icon="spark"></i>問 AI</h3>
+      <p class="hint" id="askNote">根據這場的逐字稿回答；回答裡的時間點按了會跳到逐字稿那一句。</p>
+      <div id="askStarters"></div>
+      <div id="askLog"></div>
+      <form id="askForm">
+        <textarea id="askQ" rows="2" maxlength="2000" placeholder="問這場會議，例如：有哪些待辦事項？" aria-label="問題"></textarea>
+        <div class="minCtl"><button type="submit" id="askGo">送出</button><button type="button" id="askClear" hidden>清除對話</button><span class="hint" id="askKeys">Enter 送出，Shift＋Enter 換行</span></div>
+      </form>
     </section>
   </div>
 </aside>
@@ -824,6 +900,10 @@ let importing = null, meetingImported = false;
 // 表單紀錄（#3、#97，例如 IEP 會議紀錄）：form＝{template, title, date, values:{header, items}, edited, switched}
 let form = null, formBusy = false, formError = "", formAsk = 0;
 let modCatalog = [], modLoaded = false, modules = [], modBusy = null, modError = "";   // 延伸模組（#136）：清單由主機給；modules 是這場產生過的結果；modBusy＝{key, label}
+// 問 AI（#214）：askLog 是 [{q, a, at}]，記進暫存 ai.json 的 ask；畫面與送出在下面「問 AI」那段
+let askLog = [], askBusy = false, askError = "", askPending = "", askClearAt = 0;   // askLog：[{q, a, at}]，記進暫存 ai.json 的 ask
+const ASK_MAX = 100, ASK_HISTORY = 3;
+const ASK_STARTERS = [_("這場會議的重點是什麼？"), _("有哪些待辦事項？誰負責、什麼時候要完成？"), _("做了哪些決定？"), _("有哪些還沒解決、要再討論的問題？")];
 let agenda = null;   // 會議議程（#97），說明在議程那一段
 const studentLabels = {};   // 學生代碼 → 選單上的名字（config students_label，沒設就是代碼）
 const formSchemas = {};
@@ -1199,6 +1279,7 @@ function updateSegs() {
 
 // 增量更新：只建新句子、只重畫文字有變的句子（長會議也不會每則訊息重轉整份繁體）
 function renderSegs(full = false) {
+  showTab("ask", segs.length > 0 || askLog.length > 0);   // 問 AI（#214）：有逐字稿就能問
   const box = $("segs"), doc = document.scrollingElement;
   if (full) { box.innerHTML = ""; segs.forEach((s) => { s.el = null; }); }
   // 錄音中且停在最底下時，跟著新句子往下捲；往上翻看時不打擾
@@ -2581,6 +2662,7 @@ function resetMinutes() {
   resetMindmap();
   resetForm();
   resetModules();
+  resetAsk();
 }
 
 function localDate(d) {
@@ -3980,9 +4062,143 @@ function asrTerms() {
   return out;
 }
 
+// ---- 問 AI（#214）：對這場會議的逐字稿自由提問；回答裡的 [時:分:秒] 按了跳到逐字稿那一句 ----
+function cleanAsk(v) {
+  return (Array.isArray(v) ? v : []).filter((x) => x && typeof x.q === "string" && typeof x.a === "string" && x.q.trim() && x.a.trim())
+    .slice(-ASK_MAX).map((x) => ({ q: x.q, a: x.a, at: Number(x.at) || 0 }));
+}
+function resetAsk() { askLog = []; askBusy = false; askError = ""; askPending = ""; askClearAt = 0; $("askQ").value = ""; renderAsk(); }
+
+// 問 AI 的段落：AI 整理過的段落（校正過）在前；還沒整理到的句子（會議進行中、沒開 AI 整理）照逐字稿接在後面
+function askParas() {
+  const out = minutesParas();
+  let from = 0;
+  if (out.length) for (const c of chunks.values()) if ((c.corrected || c.text) && Number.isInteger(c.lastSegIdx)) from = Math.max(from, c.lastSegIdx + 1);
+  let lastSpk = null, at = out.length ? out[out.length - 1].start : 0;
+  for (const x of segs.slice(from)) {
+    const t = show(x.text).trim();
+    if (!t) continue;
+    const head = x.speaker && x.speaker !== lastSpk ? `講者 ${x.speaker}：` : "";   // 不翻：送給 AI 的段落格式
+    lastSpk = x.speaker ?? lastSpk;
+    at = Number.isInteger(x.start) ? x.start : at;   // 匯入的純文字沒有時間：沿用前一句的
+    out.push({ start: at, text: head + t });
+  }
+  return out;
+}
+
+const ASK_TIME = /\[((?:\d{1,2}:)?\d{1,2}:\d{2})\]/g;
+const askMs = (t) => t.split(":").map(Number).reduce((a, n) => a * 60 + n, 0) * 1000;
+// 回答排好後，把文字裡的 [時:分:秒] 換成按鈕（程式碼、連結裡的不換）；只建 DOM 節點，不塞 HTML
+function askLinkTimes(box) {
+  const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT), nodes = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    ASK_TIME.lastIndex = 0;
+    if (!n.parentElement.closest("code, pre, a") && ASK_TIME.test(n.nodeValue)) nodes.push(n);
+  }
+  for (const n of nodes) {
+    const text = n.nodeValue, frag = document.createDocumentFragment();
+    let last = 0;
+    ASK_TIME.lastIndex = 0;
+    for (let m = ASK_TIME.exec(text); m; m = ASK_TIME.exec(text)) {
+      frag.append(text.slice(last, m.index));
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "ask-t"; b.textContent = m[1]; b.dataset.ms = String(askMs(m[1]));
+      b.title = _("跳到逐字稿這裡");
+      frag.append(b);
+      last = m.index + m[0].length;
+    }
+    frag.append(text.slice(last));
+    n.replaceWith(frag);
+  }
+}
+
+function askItem(q, a, i) {
+  const item = document.createElement("div");
+  item.className = "ask-item";
+  const qp = document.createElement("p");
+  qp.className = "ask-q"; qp.textContent = q;
+  const ab = document.createElement("div");
+  ab.className = "ask-a";
+  item.append(qp, ab);
+  if (a == null) { ab.classList.add("wait"); ab.textContent = _("AI 正在看逐字稿回答…（大約半分鐘）"); return item; }
+  renderMd(ab, a);
+  askLinkTimes(ab);
+  const act = document.createElement("div");
+  act.className = "ask-act";
+  const cp = document.createElement("button");
+  cp.type = "button"; cp.className = "ask-copy"; cp.dataset.i = String(i); cp.textContent = _("複製回答");
+  act.append(cp);
+  item.append(act);
+  return item;
+}
+
+function renderAsk() {
+  showTab("ask", segs.length > 0 || askLog.length > 0);
+  const log = $("askLog");
+  log.replaceChildren(...askLog.map((x, i) => askItem(x.q, x.a, i)), ...(askBusy ? [askItem(askPending, null, -1)] : []));
+  const st = $("askStarters");
+  st.hidden = askLog.length > 0 || askBusy;
+  if (!st.hidden && !st.childElementCount) {
+    for (const q of ASK_STARTERS) {
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = q;
+      b.onclick = () => sendAsk(q);
+      st.append(b);
+    }
+  }
+  $("askGo").disabled = askBusy;
+  $("askClear").hidden = !askLog.length || askBusy;
+  $("askClear").textContent = Date.now() - askClearAt < 5000 ? _("再按一次就清除") : _("清除對話");
+  const note = $("askNote");
+  note.className = "hint" + (askError ? " err" : "");
+  note.textContent = askError ? _("沒有回答成功：{askError}。可以再問一次。", { askError })
+    : _("根據這場的逐字稿回答；回答裡的時間點按了會跳到逐字稿那一句。");
+}
+
+async function sendAsk(text) {
+  const q = String(text ?? "").trim();
+  if (!q || askBusy) return;
+  const paras = askParas();
+  if (!paras.length) { askError = _("還沒有逐字稿可以問"); renderAsk(); return; }
+  const mid = meetingId;
+  askBusy = true; askError = ""; askPending = q;
+  renderAsk();
+  try {
+    const history = askLog.slice(-ASK_HISTORY).map((x) => ({ q: x.q, a: x.a }));
+    const r = await postJson("/api/agent/ask", { meeting: mid, paras, question: q, history, context: meetingContext, ai_lang: meetingAiLang });
+    const j = await r.json().catch(() => ({}));
+    if (mid !== meetingId) return;   // 等待期間換了一場，這個回答不要了
+    if (r.ok && typeof j.answer === "string") {
+      askLog = [...askLog, { q, a: j.answer, at: Date.now() }].slice(-ASK_MAX);
+      if ($("askQ").value.trim() === q) $("askQ").value = "";
+      extraUsage = addUsage(extraUsage, j.usage); renderUsage(); saveAiSoon();
+    } else askError = j.error || `HTTP ${r.status}`;
+  } catch (e) {
+    if (mid === meetingId) askError = _("連不到伺服器");
+  } finally {
+    if (mid === meetingId) { askBusy = false; askPending = ""; renderAsk(); $("panel-ask").scrollTop = $("panel-ask").scrollHeight; }
+  }
+}
+
+$("askForm").onsubmit = (e) => { e.preventDefault(); sendAsk($("askQ").value); };
+// Enter 送出、Shift＋Enter 換行；注音／倉頡選字中的 Enter 不算
+$("askQ").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); sendAsk($("askQ").value); } };
+$("askLog").onclick = (e) => {
+  const t = e.target.closest(".ask-t");
+  if (t) { jumpTo(Number(t.dataset.ms)); return; }
+  const c = e.target.closest(".ask-copy");
+  if (c && askLog[Number(c.dataset.i)]) copyText(askLog[Number(c.dataset.i)].a, c);
+};
+// 清除對話：5 秒內再按一次才清（不用跳確認框）
+$("askClear").onclick = () => {
+  if (Date.now() - askClearAt > 5000) { askClearAt = Date.now(); renderAsk(); setTimeout(renderAsk, 5100); return; }
+  askLog = []; askClearAt = 0; askError = "";
+  renderAsk(); saveAiSoon();
+};
+
 // ---- 側邊欄：收合、頁籤、拖曳調寬（只記在這台瀏覽器） ----
 const wide = matchMedia("(min-width:1000px)");
-const TABS = ["agenda", "live", "paras", "summary", "map", "ext"];
+const TABS = ["agenda", "live", "paras", "summary", "map", "ext", "ask"];
 
 function setSide(open, remember = true) {
   $("side").hidden = !open;
@@ -4853,7 +5069,7 @@ function aiSnapshot() {
     seg: c.lastSegIdx ?? null,
   }));
   // usage_epoch：aiUsage 是哪一個整理程序的累計值；伺服器也會寫用量，靠它分辨要不要併進 extra_usage（#126）
-  return { chunks: list, live: lastLive, summary, minutes, mindmap, form, agenda, modules, name_fixes: nameFixes, usage: aiUsage, usage_epoch: aiEpoch, extra_usage: extraUsage };
+  return { chunks: list, live: lastLive, summary, minutes, mindmap, form, agenda, modules, ask: askLog, name_fixes: nameFixes, usage: aiUsage, usage_epoch: aiEpoch, extra_usage: extraUsage };
 }
 async function saveAi() {
   if (!draftId) return;
@@ -4973,6 +5189,8 @@ async function openDraft(id, btn) {
   renderMindmap();
   modules = cleanModules(ai.modules); modBusy = null; modError = "";
   renderModules();
+  askLog = cleanAsk(ai.ask); askBusy = false; askError = ""; askPending = "";
+  renderAsk();
   form = ai.form || ai.iep || null; formError = ""; formBusy = false;   // 舊版暫存叫 iep
   agenda = ai.agenda || null;
   if (form && formSchemas[form.template]) $("formTpl").value = form.template;
@@ -5078,6 +5296,7 @@ function saveSnapshot() {
     chunks: audioChunks, mime: audioMime, done: audioDone, withAudio: $("saveAudio").checked, dId: draftId, mid: meetingId,
     transcript: transcriptFile(),
     summaryMd: summary ? summaryMarkdown() : null, summaryLater: !summary && (sumPending || sumBusy), extras: moduleFiles(),
+    askMd: RecapFiles.askMarkdown({ header: meetingHeader(), items: askLog }) || null,
     minutesMd: minutes ? minutesMarkdown() : null,
     mindmapMd: mindmap ? MindMap.toMarkdown(mindmap) : null, mindmapSvg: mindmap ? MindMap.toSvg(mindmap) : null, mindmapOpmlText: mindmap ? MindMap.toOpml(mindmap) : null,
     // 只送這台的擴充包認得的表單：舊暫存的表單在沒有擴充包的機器上會被伺服器拒絕，連逐字稿都存不了。表單資料留在暫存裡
@@ -5088,7 +5307,7 @@ function saveSnapshot() {
 $("saveBtn").onclick = () => (driveMode === "browser" ? saveToGoogle(saveSnapshot()) : saveLocal(saveSnapshot()));
 
 async function saveLocal(snap) {
-  const { root, folder, title, chunks, mime, done, withAudio, dId, mid, transcript, summaryMd, summaryLater, extras, minutesMd, mindmapMd, mindmapSvg, mindmapOpmlText, formBody } = snap;
+  const { root, folder, title, chunks, mime, done, withAudio, dId, mid, transcript, summaryMd, summaryLater, extras, askMd, minutesMd, mindmapMd, mindmapSvg, mindmapOpmlText, formBody } = snap;
   const prevBtnDisabled = $("btn").disabled;
   $("saveBtn").disabled = true;
   $("dockNext").disabled = $("discardBtn").disabled = true;
@@ -5098,7 +5317,7 @@ async function saveLocal(snap) {
     const r = await fetch(api("/api/save/transcript"), {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Meeting-Scribe": "1" },
-      body: JSON.stringify({ root, folder, title, transcript, summary: summaryMd, extras, minutes: minutesMd, mindmap: mindmapMd, mindmap_svg: mindmapSvg, mindmap_opml: mindmapOpmlText, form: formBody }),
+      body: JSON.stringify({ root, folder, title, transcript, summary: summaryMd, extras, ask: askMd, minutes: minutesMd, mindmap: mindmapMd, mindmap_svg: mindmapSvg, mindmap_opml: mindmapOpmlText, form: formBody }),
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
@@ -5464,7 +5683,7 @@ async function saveGoogleRun(s) {
   let audioBytes = 0;
   try {
     setSaveStatus(_("整理要存的檔…"));
-    const r = await postJson("/api/save/bundle", { folder: s.folder, title: s.title, stamp: gStamp(), transcript: s.transcript, summary: s.summaryMd, extras: s.extras,
+    const r = await postJson("/api/save/bundle", { folder: s.folder, title: s.title, stamp: gStamp(), transcript: s.transcript, summary: s.summaryMd, extras: s.extras, ask: s.askMd,
       minutes: s.minutesMd, mindmap: s.mindmapMd, mindmap_svg: s.mindmapSvg, mindmap_opml: s.mindmapOpmlText, form: s.formBody });
     const b = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
@@ -5549,12 +5768,95 @@ gTokenLoad();
 
 loadDriveRoots();
 loadEngines();
-$("dl").onclick = () => {
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([transcriptFile()], { type: "text/plain" }));
-  a.download = `transcript-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "")}.txt`;
-  a.click();
+// ---- 匯出（#215）：逐字稿 TXT、字幕 SRT／VTT、完整紀錄 Markdown／Word／PDF；格式在 web/shared/recap-files.js ----
+function exportStamp() {
+  const d = new Date(meetingStartedAt || Date.now()), two = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}${two(d.getHours())}${two(d.getMinutes())}`;
+}
+// 檔名：會議名稱（開頭的日期拿掉，時間另外接；不能用的字換成 _，最多 60 字）＋時間；沒有名稱用 meeting
+function exportBase() {
+  const name = Array.from(String(meetingTitle || "").replace(/^\d{4}-\d{2}-\d{2}\s*/, "").replace(/[/\\:*?"<>|\u0000-\u001f]/g, "_").replace(/^\.+/, "").trim()).slice(0, 60).join("");
+  return `${name || "meeting"}-${exportStamp()}`;   // 不翻：檔名
+}
+const exportSegs = () => segs.map((s) => ({ start: s.start, speaker: s.speaker, text: show(s.text).trim() }));
+// 完整紀錄：會議資訊、簡介與章節、完整與短總結、會議紀錄、延伸、問 AI、逐字稿（有的才放）
+function exportDocument() {
+  const sections = [];
+  if (summary) {
+    sections.push({ title: "簡介", markdown: RecapFiles.introText(summary.intro, summary.chapters) });   // 不翻：存檔內容
+    sections.push({ title: "完整總結", markdown: summary.full });   // 不翻：存檔內容
+    sections.push({ title: "短總結", markdown: summary.short });   // 不翻：存檔內容
+  }
+  if (minutes) sections.push({ title: "會議紀錄", markdown: minutesMarkdown().split("\n\n").slice(2).join("\n\n") });   // 不翻：存檔內容（拿掉自己的標題與日期，表頭已經有）
+  for (const m of modules) sections.push({ title: fileLabel(m), markdown: m.markdown });
+  if (askLog.length) sections.push({ title: "問 AI", markdown: RecapFiles.askBody(askLog) });   // 不翻：存檔內容
+  sections.push({ title: "逐字稿", markdown: transcriptBody() });   // 不翻：存檔內容
+  const when = meetingStartedAt ? `日期：${localDate(new Date(meetingStartedAt))}` : "";   // 不翻：存檔內容
+  return RecapFiles.documentMarkdown({ title: meetingTitle || "會議紀錄", header: [...meetingHeader(), ...(when ? [when] : [])], sections });   // 不翻：存檔內容
+}
+function setExportNote(text, err = false) {
+  const n = $("exportNote");
+  n.hidden = !text; n.textContent = text; n.className = "help" + (err ? " err" : "");
+}
+async function exportAs(kind) {
+  const base = exportBase(), later = !summary && (sumPending || sumBusy);
+  const note = later && ["md", "docx", "pdf"].includes(kind) ? _("總結還在產生，這份先不含總結；產生好再匯出一次就有。") : "";
+  try {
+    if (kind === "txt") downloadBlob(new Blob([transcriptFile()], { type: "text/plain;charset=utf-8" }), `transcript-${exportStamp()}.txt`);   // 不翻：檔名
+    else if (kind === "srt") downloadBlob(new Blob([RecapFiles.srt(exportSegs())], { type: "application/x-subrip;charset=utf-8" }), `${base}.srt`);
+    else if (kind === "vtt") downloadBlob(new Blob([RecapFiles.vtt(exportSegs())], { type: "text/vtt;charset=utf-8" }), `${base}.vtt`);
+    else if (kind === "md") downloadBlob(new Blob([exportDocument()], { type: "text/markdown;charset=utf-8" }), `${base}.md`);
+    else if (kind === "docx") {
+      setExportNote(_("正在產生 Word 檔…"));
+      const r = await postJson("/api/export/docx", { meeting: meetingId || newMeetingId(), title: meetingTitle || "", markdown: exportDocument() });
+      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || `HTTP ${r.status}`); }
+      downloadBlob(await r.blob(), `${base}.docx`);
+    } else if (kind === "pdf") {
+      printDocument(exportDocument(), base);
+      setExportNote(_("在列印視窗的「目的地」選「儲存為 PDF」。{note}", { note }));
+      return;
+    }
+    setExportNote(note);
+  } catch (e) {
+    setExportNote(_("匯出失敗：{msg}", { msg: e instanceof TypeError ? _("連不到伺服器") : e.message }), true);
+  }
+}
+// 存 PDF：把完整紀錄排進 #printDoc，叫出瀏覽器的列印（只印這一塊）；分頁標題暫時換成檔名，存檔時預設就是它
+// 原本的標題只在還沒進入列印狀態時記：連按兩次（或瀏覽器沒發 afterprint）也還原得回來
+let printTitle = "";
+function printDocument(md, base) {
+  const box = $("printDoc");
+  if (!document.body.classList.contains("printing")) printTitle = document.title;
+  MdView.render(box, md, { top: 1 });
+  document.body.classList.add("printing");
+  document.title = base;
+  const done = () => { document.body.classList.remove("printing"); document.title = printTitle; box.replaceChildren(); window.removeEventListener("afterprint", done); };
+  window.addEventListener("afterprint", done);
+  window.print();
+}
+function setExportMenu(open) {
+  const m = $("exportMenu");
+  m.hidden = !open;
+  $("dl").setAttribute("aria-expanded", String(open));
+  if (!open) return;
+  const timed = segs.some((s) => Number.isInteger(s.start));   // 匯入的純文字沒有時間，做不了字幕
+  for (const b of m.querySelectorAll('[data-export="srt"], [data-export="vtt"]')) { b.disabled = !timed; b.title = timed ? "" : _("這份逐字稿沒有時間，沒辦法做字幕"); }
+  m.querySelector("button:not(:disabled)").focus();
+}
+$("dl").onclick = () => setExportMenu($("exportMenu").hidden);
+document.addEventListener("click", (e) => { if (!$("exportMenu").hidden && !e.target.closest("#exportMenu, #dl")) setExportMenu(false); });
+$("exportMenu").onkeydown = (e) => {
+  const items = [...$("exportMenu").querySelectorAll("button:not(:disabled)")], i = items.indexOf(document.activeElement);
+  if (e.key === "Escape") { e.preventDefault(); setExportMenu(false); $("dl").focus(); }
+  else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus(); }
+};
+$("exportMenu").onclick = (e) => {
+  const b = e.target.closest("[data-export]");
+  if (!b || b.disabled) return;
+  setExportMenu(false);
+  exportAs(b.dataset.export);
 };
 </script>
+<div id="printDoc" aria-hidden="true"></div>
 </body>
 </html>

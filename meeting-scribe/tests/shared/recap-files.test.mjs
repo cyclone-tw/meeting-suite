@@ -83,3 +83,49 @@ test("parseTranscript reads plain text and Markdown line by line, splitting long
   assert.deepEqual(plain(R.parseTranscript("")), []);
   assert.deepEqual(plain(R.parseTranscript(null)), []);
 });
+
+// 問 AI（#214）：ask.md 每題一節，問題壓成一行，回答標題降一級；沒有問答（或都是空的）回空字串，不存檔
+test("askMarkdown writes one section per question and nothing when there are no answers", () => {
+  assert.equal(R.askMarkdown({ header: ["會議：週三個案會議"], items: [{ q: "有哪些\n待辦？", a: "## 待辦\n- 導師交清單 [00:01:02]\n" }, { q: "", a: "沒有問題的不收" }, { q: "第二題", a: "回答" }] }),
+    "# 問 AI\n\n會議：週三個案會議\n\n## 1. 有哪些 待辦？\n\n### 待辦\n- 導師交清單 [00:01:02]\n\n## 2. 第二題\n\n回答\n");
+  assert.equal(R.askMarkdown({ items: [] }), "");
+  assert.equal(R.askMarkdown({ items: [{ q: "問", a: "  " }] }), "");
+  assert.equal(R.askMarkdown(), "");
+  const long = R.askMarkdown({ items: [{ q: "問".repeat(130), a: "答" }] });
+  assert.match(long, /^# 問 AI\n\n## 1\. 問{120}…\n/);
+});
+
+// 匯出（#215）：字幕的結束時間＝下一句開始，最長照字數估；沒有時間的句子不收；VTT 標講者並跳脫 < > &；讀回來時間一樣
+test("srt and vtt end each cue at the next start (or a length guess), skip untimed lines, mark speakers in VTT and read back", () => {
+  const segs = [
+    { start: 5000, speaker: "1", text: "我們先看作業。" },
+    { start: 6000, speaker: "1", text: "大家都交了 <很好> & 準時" },
+    { start: null, speaker: "2", text: "沒有時間的一句" },
+    { start: 30000, speaker: null, text: "一".repeat(60) },
+    { start: 40000, speaker: "", text: "  " },
+  ];
+  assert.equal(JSON.stringify(R.subtitleCues(segs).map((c) => [c.start, c.end])), JSON.stringify([[5000, 6000], [6000, 9300], [30000, 37000]]),
+    "下一句開始就結束；第二句 15 字照字數 3.3 秒；最後一句 60 字最長 7 秒");
+  assert.equal(R.srt(segs).split("\n\n")[0], "1\n00:00:05,000 --> 00:00:06,000\n我們先看作業。");
+  const vtt = R.vtt(segs);
+  assert.match(vtt, /^WEBVTT\n\n00:00:05\.000 --> 00:00:06\.000\n<v 講者 1>我們先看作業。\n/);
+  assert.match(vtt, /<v 講者 1>大家都交了 &lt;很好&gt; &amp; 準時\n/);
+  assert.match(vtt, /00:00:30\.000 --> 00:00:37\.000\n一{60}\n/, "沒有講者不標");
+  assert.equal(JSON.stringify(R.parseTranscript(vtt).map((x) => [x.start, x.text])), JSON.stringify([[5000, "我們先看作業。"], [6000, "大家都交了 <很好> & 準時"], [30000, "一".repeat(60)]]));
+  assert.equal(JSON.stringify(R.parseTranscript(R.srt(segs)).map((x) => x.start)), JSON.stringify([5000, 6000, 30000]));
+  assert.equal(R.srt([]), "");
+  assert.equal(R.vtt([]), "WEBVTT\n\n");
+  // 不是整秒的時間照毫秒寫（#217）
+  assert.equal(R.srt([{ start: 61234, text: "一二三四五六" }, { start: 63007, text: "下一句" }]).split("\n").slice(0, 3).join("|"), "1|00:01:01,234 --> 00:01:02,554|一二三四五六");
+  assert.match(R.vtt([{ start: 3723045, text: "x" }]), /\n01:02:03\.045 --> 01:02:04\.045\n/);
+  // 兩句同一個時間開始：前一句照字數估，不會變成 0 長度
+  assert.equal(JSON.stringify(R.subtitleCues([{ start: 0, text: "甲" }, { start: 0, text: "乙" }]).map((c) => c.end)), JSON.stringify([1000, 1000]));
+});
+
+test("documentMarkdown puts non-empty sections under the title, one level down", () => {
+  assert.equal(R.documentMarkdown({ title: "週三個案會議", header: ["地點：資源班", "日期：2026-11-08"], sections: [
+    { title: "完整總結", markdown: "## 閱讀\n- 進步" }, { title: "空的", markdown: "  " }, { title: "問 AI", markdown: R.askBody([{ q: "待辦？", a: "導師交清單" }]) },
+  ] }), "# 週三個案會議\n\n地點：資源班\n日期：2026-11-08\n\n## 完整總結\n\n### 閱讀\n- 進步\n\n## 問 AI\n\n### 1. 待辦？\n\n導師交清單\n");
+  assert.equal(R.documentMarkdown({ sections: [] }), "# 會議紀錄\n\n");
+  assert.equal(R.askBody([]), "");
+});

@@ -54,9 +54,10 @@ function main() {
     return 2;
   }
   if (opts.help) { console.log(usage()); return 0; }
-  const shared = sharedVocabulary();
-  if (!shared.path) {
-    console.error("vocab-export-zerotype: the shared vocabulary note was not found or is broken (see config/asr-profile.json shared_vocabulary.paths); nothing written.");
+  const shared = sharedVocabulary({ fresh: true });
+  // 只用這次從 wiki 讀到的正本寫：沒讀到、或只有舊的那一份（wiki 連不上），都不動 ZeroType 的表
+  if (shared.state !== "loaded") {
+    console.error("vocab-export-zerotype: the shared vocabulary note could not be read from the wiki just now (see shared_vocabulary.wiki_path and wiki_cli in the user profile); nothing written.");
     return 1;
   }
   if (!Object.keys(shared.fixed).length && !Object.keys(shared.dictation).length) {

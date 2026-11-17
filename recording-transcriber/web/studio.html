@@ -30,15 +30,18 @@
   <symbol id="i-fwd" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
   <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 010 12h-3"/></symbol>
   <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></symbol>
+  <symbol id="i-film" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9.5v5l4.5-2.5z"/></symbol>
   <symbol id="i-fire" viewBox="0 0 24 24"><path d="M4 6h16v12H4z"/><path d="M8 14h8"/></symbol>
   <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3v8"/><path d="M6.3 7.3a8 8 0 1011.4 0"/></symbol>
   <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></symbol>
   <symbol id="i-book" viewBox="0 0 24 24"><path d="M5 4.5A1.5 1.5 0 016.5 3H19v15H6.5A1.5 1.5 0 005 19.5z"/><path d="M5 19.5A1.5 1.5 0 006.5 21H19v-3"/><path d="M9 7h6"/></symbol>
+  <symbol id="i-side" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></symbol>
+  <symbol id="i-yt" viewBox="0 0 24 24"><rect x="2.5" y="5.5" width="19" height="13" rx="3.5" fill="currentColor" stroke="none"/><path d="M10 9v6l5-3z" fill="#fff" stroke="none"/></symbol>
   <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 15V4"/><path d="M7 9l5-5 5 5"/><path d="M4 15v4a1 1 0 001 1h14a1 1 0 001-1v-4"/></symbol>
 </svg>
 
 <header>
-  <button class="btn ghost" id="homeBtn" hidden aria-label="回到所有影片"><svg class="icon"><use href="#i-back"/></svg>所有影片</button>
+  <button class="btn ghost" id="libToggle" hidden aria-pressed="true" aria-controls="lib" title="顯示或收起左邊的影片庫（⌘B）" aria-label="影片庫"><svg class="icon"><use href="#i-side"/></svg></button>
   <span id="appName"><img src="/app-icon.png" alt=""><span class="app-label">Cyclone 字幕工作室</span></span>
   <span id="projName"></span>
   <span class="badge warn" id="privBadge" hidden>含個資</span>
@@ -63,40 +66,38 @@
 <div id="alert" role="alert" hidden><span id="alertText"></span><button class="btn sm" id="alertClose">知道了</button></div>
 <div id="toast" role="status" hidden></div>
 
-<!-- 首頁 -->
-<section id="home" class="page wide" hidden>
-  <div class="card">
-    <h1>要幫哪支影片上字幕？</h1>
-    <p class="muted" style="margin:0">點一支影片先預覽、把不要的段落剪掉，再自動辨識、只修錯字不改寫，邊看影片邊微調，最後輸出影片，或直接上傳 YouTube。</p>
-
-    <ul id="videoList" style="margin-top:18px"></ul>
-    <p class="hint" id="videoEmpty" hidden>「影片」、「桌面」、「下載」（和設定的 iCloud 共用資料夾）裡沒有找到影片。</p>
-    <p class="hint" id="videoNote" hidden>標「iCloud」的影片放在 iCloud 共用資料夾的 studio，每台 Mac 都看得到；做好的檔案也會放在旁邊，一起同步。</p>
-    <div class="pick-row">
-      <button class="btn" id="pickBtn"><svg class="icon"><use href="#i-folder"/></svg>從 Finder 選…</button>
-      <input class="text-in" id="pathIn" placeholder="或貼上影片的完整路徑（Finder 選檔後按 ⌥⌘C 複製路徑），按 Enter" autocomplete="off">
-      <button class="btn" id="pathGo" disabled>預覽</button>
+<div id="shell" hidden>
+  <!-- 左欄影片庫（#170、#184）：加入的資料夾（可以收合）、YouTube 連結、單獨加入的影片、其他專案 -->
+  <aside id="lib" aria-label="影片庫">
+    <div class="lib-head">
+      <b>影片庫</b>
+      <button class="btn sm" id="libAdd" aria-haspopup="menu" aria-expanded="false" aria-controls="addMenu" title="加入影片網址、資料夾或影片檔">＋</button>
+      <button class="btn sm ghost" id="libRefresh" title="重新讀取資料夾裡的影片" aria-label="重新整理影片庫">↻</button>
+      <button class="btn sm ghost" id="libClose" title="收起影片庫（⌘B）" aria-label="收起影片庫"><svg class="icon"><use href="#i-back"/></svg></button>
     </div>
-    <!-- 外語影片做雙語字幕（#56）：貼 YouTube 網址下載 -->
-    <div class="pick-row" id="ytRow">
-      <input class="text-in" id="ytUrl" placeholder="或貼上 YouTube 網址：下載外語影片，做中文或雙語字幕" autocomplete="off" spellcheck="false">
-      <select class="text-in" id="ytLangSel" aria-label="影片說的語言" style="flex:none;width:auto"><option value="">自動判斷語言</option><option value="en">英文</option><option value="ja">日文</option><option value="ko">韓文</option><option value="zh">中文</option></select>
-      <button class="btn" id="ytGo" disabled>下載並上字幕</button>
+    <div class="add-menu" id="addMenu" role="menu" hidden>
+      <button type="button" role="menuitem" data-add="url"><b>影片網址…</b><span>YouTube 只連結或下載；Facebook、X 下載</span></button>
+      <button type="button" role="menuitem" data-add="folder"><b>加入資料夾…</b><span>用 Finder 選，列出裡面所有影片</span></button>
+      <button type="button" role="menuitem" data-add="file"><b>加入影片檔…</b><span>用 Finder 選一支影片</span></button>
     </div>
-    <p class="hint" id="ytHint">作者有上傳字幕就直接用，沒有才用 Soniox 辨識；再請 Claude 逐句翻成台灣繁中。下載的影片放在「影片／YouTube 下載」，只給自己看、做筆記用。</p>
-    <div id="importBox" hidden>
-      <div class="imp-head"><b id="impTitle">讀取影片資訊…</b><button class="btn sm" id="impCancel">停止</button></div>
-      <progress id="impBar" max="1" value="0"></progress>
-      <p class="hint" id="impStep" style="margin:4px 0 0"></p>
+    <input class="text-in" id="libFind" type="search" placeholder="找影片或專案" autocomplete="off" aria-label="找影片或專案">
+    <div id="libTree"></div>
+    <p class="hint" id="libEmpty" hidden>影片庫是空的。按「＋」加入資料夾、影片檔或影片網址。</p>
+  </aside>
+  <div class="split" id="splitL" role="separator" aria-orientation="vertical" aria-controls="lib" aria-label="調整影片庫的寬度" tabindex="0" title="拖拉調整寬度；雙擊回到預設"></div>
+  <main id="views">
+<!-- 空狀態（#184）：還沒選影片 -->
+<section id="empty" class="page" hidden>
+  <div class="card empty-card">
+    <h1>從左邊挑一支影片</h1>
+    <p class="muted" style="margin:0">點影片庫裡的影片就能開始：做過字幕的直接進編輯，還沒做的先預覽、把不要的段落剪掉，再自動辨識。</p>
+    <div class="empty-actions">
+      <button class="btn solid" data-add="url">貼影片網址…</button>
+      <button class="btn" data-add="folder">加入資料夾…</button>
+      <button class="btn" data-add="file">加入影片檔…</button>
     </div>
-  </div>
-
-  <div class="card" id="projCard" hidden>
-    <h2>繼續編輯</h2>
-    <ul id="projList"></ul>
   </div>
 </section>
-
 <!-- 預覽與粗剪（recording-transcriber#4）-->
 <section id="trim" hidden>
   <div id="tLeft">
@@ -187,15 +188,6 @@
     </div>
   </aside>
 </section>
-
-<!-- 已關閉 -->
-<section id="closed" class="page" hidden>
-  <div class="card">
-    <h1>字幕工作室已經關閉</h1>
-    <p class="muted" style="margin:6px 0 0">可以關掉這個分頁了。要再用時，點 Dock 或「應用程式」裡的「字幕工作室」。</p>
-  </div>
-</section>
-
 <!-- 處理中 -->
 <section id="processing" class="page" hidden>
   <div class="card">
@@ -205,6 +197,7 @@
       <li data-k="preview"><i></i>準備預覽用的影片</li>
       <li data-k="tracks"><i></i>對齊 Discord 分軌</li>
       <li data-k="fill"><i></i>補回沒錄到的聲音</li>
+      <li data-k="audio"><i></i>只抓 YouTube 音檔（影片不下載，辨識完刪掉）</li>
       <li data-k="extract"><i></i>抽出聲音</li>
       <li data-k="asr"><i></i>雲端辨識（Soniox，取回後立刻刪除雲端副本）</li>
       <li data-k="proofread"><i></i>AI 逐字校對（只修錯字）</li>
@@ -219,16 +212,15 @@
     </div>
   </div>
 </section>
-
 <!-- 編輯 -->
 <section id="editor" hidden>
   <div id="left">
-    <div id="stageWrap"><div id="stage"><video id="video" preload="auto" playsinline></video><div id="overlay" aria-hidden="true"></div></div></div>
+    <div id="stageWrap"><div id="stage"><video id="video" preload="auto" playsinline></video><iframe id="ytFrame" hidden title="YouTube 影片" allow="autoplay; encrypted-media; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin"></iframe><div id="overlay" aria-hidden="true"></div></div></div>
     <div class="scrub-wrap" hidden><input type="range" id="scrub" min="0" max="1000" value="0" step="1" aria-label="播放位置"><div id="scrubCuts" aria-hidden="true"></div></div>
     <div class="tl" id="etl" aria-label="時間軸：點一下跳過去，拖拉選一段，點剪掉的區段可以恢復">
-      <div class="tl-scroll"><div class="tl-inner">
+      <div class="tl-scroll"><div class="tl-chaps" hidden></div><div class="tl-inner">
         <div class="tl-view"><canvas class="tl-thumbs"></canvas><canvas class="tl-wave"></canvas></div>
-        <div class="tl-hints"></div><div class="tl-cuts"></div><div class="tl-sel" hidden></div><div class="tl-mark" hidden></div><div class="tl-head"></div>
+        <div class="tl-hints"></div><div class="tl-cuts"></div><div class="tl-notes" aria-hidden="true"></div><div class="tl-sel" hidden></div><div class="tl-mark" hidden></div><div class="tl-head"></div>
       </div></div>
       <div class="tl-foot"><span>0:00</span><span class="muted">拖拉選一段可以剪掉；點紅色的區段可以恢復</span><span id="etlEnd"></span></div>
     </div>
@@ -248,6 +240,7 @@
       <button class="btn" id="nextCue" title="下一句（↓）" aria-label="下一句"><svg class="icon"><use href="#i-next"/></svg></button>
       <button class="btn" id="playCue" title="從這句開頭播到結尾（P）">播這一句</button>
       <span class="time" id="timeNow">0:00.0</span>
+      <span class="chap-now" id="chapNow"></span>
       <span class="spacer"></span>
       <label class="muted" style="font-size:13px">速度
         <select id="rate" class="btn sm"><option value="1">1×</option><option value="0.85">0.85×</option><option value="0.7">0.7×</option><option value="1.25">1.25×</option></select>
@@ -272,12 +265,26 @@
       </div>
       <div id="gapNote" hidden><span>這段時間沒有字幕。</span><button class="btn sm" id="insertBtn">在這裡加一句</button></div>
     </div>
+    <!-- 學習筆記（#172）：時間戳筆記，存成專案資料夾的 notes.md -->
+    <section class="notes-box" id="notesBox" aria-label="學習筆記">
+      <div class="notes-head">
+        <button type="button" class="btn sm ghost" id="notesToggle" aria-expanded="true" aria-controls="notesBody">學習筆記 <span class="badge" id="notesCount">0</span></button>
+        <span class="spacer"></span>
+        <button type="button" class="btn sm solid" id="noteAdd" title="在目前的時間新增一則筆記（影片會先暫停）">＋ 新增筆記</button>
+      </div>
+      <div id="notesBody">
+        <p class="hint" id="notesEmpty" style="margin:0">看到想記下來的地方就按「＋ 新增筆記」：影片會先暫停，筆記掛在目前的時間，時間軸上會標出來。支援 Markdown。</p>
+        <ol id="notesList"></ol>
+      </div>
+    </section>
     <div class="keys"><span><kbd>I</kbd><kbd>O</kbd><kbd>X</kbd> 選一段剪掉</span><span><kbd>空白</kbd> 播放／暫停</span><span><kbd>⌥</kbd>+<kbd>空白</kbd> 打字時播放</span><span><kbd>←</kbd><kbd>→</kbd> 一格</span><span><kbd>⇧</kbd>+<kbd>←</kbd><kbd>→</kbd> 一秒</span><span><kbd>↑</kbd><kbd>↓</kbd> 上下句</span><span><kbd>Enter</kbd> 改完跳下一句</span><span><kbd>Esc</kbd> 離開輸入框</span></div>
   </div>
 
+  <div class="split" id="splitR" role="separator" aria-orientation="vertical" aria-controls="right" aria-label="調整右邊面板的寬度" tabindex="0" title="拖拉調整寬度；雙擊回到預設"></div>
   <div id="right">
     <div class="tabs" role="tablist">
       <button role="tab" aria-selected="true" data-tab="cuesPane" id="tabCues">字幕</button>
+      <button role="tab" aria-selected="false" data-tab="askPane" id="tabAsk">Ask AI</button>
       <button role="tab" aria-selected="false" data-tab="aiPane" id="tabAi">AI 剪輯</button>
       <button role="tab" aria-selected="false" data-tab="descPane">YouTube 說明</button>
       <button role="tab" aria-selected="false" data-tab="recapPane" id="tabRecap">會後總結</button>
@@ -332,6 +339,34 @@
       <ol id="cueList"></ol>
       <div id="listFoot"></div>
       <div class="reproc-row"><button class="btn sm ghost" id="relayoutBtn" title="只重新斷句：不重新辨識、不跑 AI、不花錢">重新排字幕…</button><button class="btn sm ghost" id="reprocBtn" title="重新整理字幕的時間與斷句、重新校對">重新處理這支影片…</button></div>
+    </div>
+    <!-- Ask AI（#171）：問這支影片的內容；答案裡的時間點一下就跳過去播 -->
+    <div class="pane" id="askPane" hidden>
+      <div class="ask-log" id="askLog" aria-live="polite"></div>
+      <div class="ask-empty" id="askEmpty">
+        <p style="margin:0;font-weight:600">問這支影片的任何事</p>
+        <p class="hint" style="margin:0">AI 看這支影片的字幕和說明欄回答，答案裡的時間點一下就跳過去播。用的是這支影片設定的校對 agent。</p>
+        <div class="ask-starters" id="askStarters"></div>
+      </div>
+      <div class="ask-compose">
+        <div class="ask-tools">
+          <label class="chk"><input type="checkbox" id="askWithTime" checked><span id="askTimeLabel">附上目前時間</span></label>
+          <!-- 外部來源（#192）：每題自己勾；只有校對 agent 是 claude 時能用，wiki 要在個人設定填 QMD 索引才出現 -->
+          <label class="chk" id="askWebWrap" title="讓 AI 上網搜尋外部資料（只有搜尋，不會打開任意網址）"><input type="checkbox" id="askWeb"><span>網路搜尋</span></label>
+          <label class="chk" id="askWikiWrap" title="讓 AI 查你的 wiki 筆記（唯讀）" hidden><input type="checkbox" id="askWiki"><span>查 wiki</span></label>
+          <button type="button" class="btn sm" id="askTplBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="askTplMenu">範本</button>
+          <span class="ask-tpl-chip" id="askTplChip" hidden><span id="askTplName"></span><button type="button" class="btn sm ghost" id="askTplClear" aria-label="不用範本">×</button></span>
+          <span class="spacer"></span>
+          <button type="button" class="btn sm ghost" id="askClear" title="清除這支影片的 Ask AI 對話">清除對話</button>
+        </div>
+        <div class="ask-tpl-menu" id="askTplMenu" role="menu" hidden></div>
+        <div class="ask-input-row">
+          <textarea id="askIn" rows="2" maxlength="2000" spellcheck="false" placeholder="問這支影片的內容…（Enter 送出，Shift+Enter 換行，↑ 叫回上一題）" aria-label="問 AI 的問題"></textarea>
+          <button type="button" class="btn solid" id="askSend" disabled>送出</button>
+          <button type="button" class="btn" id="askStop" hidden>停止</button>
+        </div>
+        <p class="hint" id="askNote" aria-live="polite" style="margin:0"></p>
+      </div>
     </div>
     <div class="pane" id="aiPane" hidden>
       <div id="aiIntro">
@@ -397,6 +432,33 @@
     </div>
   </div>
 </section>
+  </main>
+</div>
+<!-- 已關閉 -->
+<section id="closed" class="page" hidden>
+  <div class="card">
+    <h1>字幕工作室已經關閉</h1>
+    <p class="muted" style="margin:6px 0 0">可以關掉這個分頁了。要再用時，點 Dock 或「應用程式」裡的「字幕工作室」。</p>
+  </div>
+</section>
+
+<dialog id="addUrlDlg" aria-labelledby="addUrlTitle">
+  <h2 id="addUrlTitle" style="font-size:18px;margin-top:0">貼影片網址</h2>
+    <div class="pick-row" id="ytRow">
+      <input class="text-in" id="ytUrl" placeholder="或貼上 YouTube、Facebook 或 X 的影片網址：下載下來做中文或雙語字幕" autocomplete="off" spellcheck="false">
+      <select class="text-in" id="ytModeSel" aria-label="YouTube 影片要不要下載" style="flex:none;width:auto"><option value="link">只連結（不下載影片）</option><option value="download">下載影片（可以剪輯、燒字幕）</option></select>
+      <select class="text-in" id="ytCapSel" aria-label="作者沒有上傳字幕時怎麼做字幕" style="flex:none;width:auto"><option value="soniox">沒有作者字幕：只抓音檔用 Soniox 轉錄（約每小時 NT$3）</option><option value="auto">沒有作者字幕：用 YouTube 自動字幕（免費，品質較差）</option></select>
+      <select class="text-in" id="ytLangSel" aria-label="影片說的語言" style="flex:none;width:auto"><option value="">自動判斷語言</option><option value="en">英文</option><option value="ja">日文</option><option value="ko">韓文</option><option value="zh">中文</option></select>
+      <button class="btn" id="ytGo" disabled>下載並上字幕</button>
+    </div>
+    <p class="hint" id="ytHint">作者有上傳字幕就直接用，沒有才用 Soniox 辨識；外語片再請 Claude 逐句翻成台灣繁中。Facebook 和 X 的影片要先選影片說的語言。下載的影片放在「影片／YouTube 下載」，只給自己看、做筆記用。</p>
+    <div id="importBox" hidden>
+      <div class="imp-head"><b id="impTitle">讀取影片資訊…</b><button class="btn sm" id="impCancel">停止</button></div>
+      <progress id="impBar" max="1" value="0"></progress>
+      <p class="hint" id="impStep" style="margin:4px 0 0"></p>
+    </div>
+  <div class="dlg-actions"><button class="btn" id="addUrlClose">關閉</button></div>
+</dialog>
 
 <dialog id="burnDlg" aria-labelledby="burnTitle">
   <h2 id="burnTitle" style="font-size:18px">把字幕燒進影片</h2>
@@ -597,10 +659,14 @@
 <script type="module" src="/studio/libs.mjs"></script>
 <script defer src="/studio/common.js"></script>
 <script defer src="/studio/home.js"></script>
+<script defer src="/studio/player.js"></script>
 <script defer src="/studio/timeline.js"></script>
 <script defer src="/studio/trim.js"></script>
 <script defer src="/studio/editor.js"></script>
 <script defer src="/studio/cues.js"></script>
+<script defer src="/studio/layout.js"></script>
+<script defer src="/studio/ask.js"></script>
+<script defer src="/studio/notes.js"></script>
 <script defer src="/studio/names.js"></script>
 <script defer src="/studio/speakers.js"></script>
 <script defer src="/studio/burn.js"></script>

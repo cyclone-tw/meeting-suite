@@ -45,21 +45,6 @@ export async function thumbnails(video, durationMs, { onTile, signal, concurrenc
   return times.length;
 }
 
-// 首頁的影片縮圖（recording-transcriber#18）：先讀片長，再取 10% 處（最多 2 分鐘）的一格，避開開頭的黑畫面。
-// 一樣只在記憶體裡。讀不到片長時取第一格、duration_ms 回 0。
-export const POSTER_W = 320, POSTER_H = 180;
-
-export async function poster(video, { signal } = {}) {
-  const probe = await collect("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", video], { signal, maxBytes: 4096 }).catch(() => null);
-  const sec = Number(String(probe || "").trim());
-  const durationMs = Number.isFinite(sec) && sec > 0 ? Math.round(sec * 1000) : 0;
-  const at = Math.min(durationMs * 0.1, 120_000);
-  const jpg = await collect("ffmpeg", ["-v", "error", "-noaccurate_seek", "-ss", (at / 1000).toFixed(3), "-i", video, "-frames:v", "1",
-    "-vf", `scale=${POSTER_W}:${POSTER_H}:force_original_aspect_ratio=decrease,pad=${POSTER_W}:${POSTER_H}:(ow-iw)/2:(oh-ih)/2`,
-    "-f", "image2pipe", "-c:v", "mjpeg", "-q:v", "5", "-"], { signal, maxBytes: 1024 * 1024 }).catch(() => null);
-  return { jpg: jpg?.length ? jpg : null, duration_ms: durationMs };
-}
-
 // 波形：聲音降到 2000 Hz 單聲道，每個區間取最大振幅，壓成 0–255。最多 maxBuckets 格，每格至少 20 ms。
 export function peaksFromPcm(pcm, sampleRate, durationMs, maxBuckets = 20000) {
   const buckets = Math.max(1, Math.min(maxBuckets, Math.ceil(durationMs / 20)));

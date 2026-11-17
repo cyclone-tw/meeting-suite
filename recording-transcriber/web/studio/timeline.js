@@ -11,8 +11,10 @@ function makeTimeline(root, on) {
   const scroll = root.querySelector(".tl-scroll"), inner = root.querySelector(".tl-inner"), view = root.querySelector(".tl-view");
   const thumbsCv = root.querySelector(".tl-thumbs"), waveCv = root.querySelector(".tl-wave");
   const hintsBox = root.querySelector(".tl-hints");
+  const chapsBox = root.querySelector(".tl-chaps");   // 章節帶（#170），只有編輯頁有
+  const notesBox = root.querySelector(".tl-notes");   // 學習筆記的位置（#172），只有編輯頁有
   const cutsBox = root.querySelector(".tl-cuts"), selBox = root.querySelector(".tl-sel"), markBox = root.querySelector(".tl-mark"), head = root.querySelector(".tl-head");
-  const t = { dur: 1, zoom: 1, tiles: [], wave: null, cuts: [], hints: [], picked: -1, sel: null, mark: null, now: 0 };
+  const t = { dur: 1, zoom: 1, tiles: [], wave: null, cuts: [], hints: [], chaps: [], chapNow: -1, notes: [], picked: -1, sel: null, mark: null, now: 0 };
   const W = () => scroll.clientWidth * t.zoom;
   const xOf = (ms) => (ms / t.dur) * W();
   const msOf = (x) => Math.max(0, Math.min(t.dur, (x / W()) * t.dur));
@@ -55,8 +57,10 @@ function makeTimeline(root, on) {
     } else {
       w.fillStyle = css("--muted");
       w.font = "12px -apple-system, sans-serif";
-      w.fillText(t.wave ? _("這支影片沒有聲音") : _("讀取聲音波形…"), 8, WAVE_H / 2 + 4);
+      w.fillText(t.wave?.note || (t.wave ? _("這支影片沒有聲音") : _("讀取聲音波形…")), 8, WAVE_H / 2 + 4);
     }
+    if (chapsBox) drawChaps();
+    if (notesBox) notesBox.innerHTML = t.notes.map((ms) => `<div style="left:${xOf(ms)}px"></div>`).join("");
     if (hintsBox) hintsBox.innerHTML = t.hints.map((h) => `<div style="left:${xOf(h.start)}px;width:${Math.max(2, xOf(h.end) - xOf(h.start))}px"></div>`).join("");
     cutsBox.innerHTML = t.cuts.map((c, i) => `<div data-cut="${i}" class="${c.by === "ai" ? "ai" : ""}${i === t.picked ? " sel" : ""}" style="left:${xOf(c.start)}px;width:${Math.max(2, xOf(c.end) - xOf(c.start))}px" title="${_("{reason}：點一下可以恢復", { reason: esc(c.reason || _("剪掉的區段")) })}"></div>`).join("");
     selBox.hidden = !t.sel;
@@ -65,6 +69,23 @@ function makeTimeline(root, on) {
     if (t.mark !== null) markBox.style.left = `${xOf(t.mark)}px`;
     head.style.left = `${xOf(t.now)}px`;
   }
+
+  // 章節帶：一章一段，寬度夠才顯示章名；滑過看「時間 章名」，點一下跳到章節開頭
+  function drawChaps() {
+    chapsBox.hidden = !t.chaps.length;
+    chapsBox.style.width = `${W()}px`;
+    chapsBox.innerHTML = t.chaps.map((c, i) => `<button type="button" data-chap="${c.start}" class="${i === t.chapNow ? "now" : ""}" style="left:${xOf(c.start)}px;width:${Math.max(2, xOf(c.end) - xOf(c.start))}px" title="${esc(`${fmtClock(c.start)} ${c.title}`)}"><span>${esc(c.title)}</span></button>`).join("");
+  }
+  function markChap() {
+    const i = t.chaps.length ? chapterOps.chapterAt(t.chaps, t.now) : -1;
+    if (i === t.chapNow) return;
+    t.chapNow = i;
+    if (chapsBox) chapsBox.querySelectorAll("[data-chap]").forEach((b, k) => b.classList.toggle("now", k === i));
+  }
+  chapsBox?.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-chap]");
+    if (b) on.seek?.(Number(b.dataset.chap));
+  });
 
   // 播放時讓播放位置留在畫面裡
   function follow() {
@@ -101,7 +122,7 @@ function makeTimeline(root, on) {
   new ResizeObserver(() => draw()).observe(scroll);
 
   return {
-    reset(dur) { Object.assign(t, { dur: Math.max(1, dur), zoom: 1, tiles: [], wave: null, cuts: [], hints: [], picked: -1, sel: null, mark: null, now: 0 }); scroll.scrollLeft = 0; draw(); },
+    reset(dur) { Object.assign(t, { dur: Math.max(1, dur), zoom: 1, tiles: [], wave: null, cuts: [], hints: [], chaps: [], chapNow: -1, notes: [], picked: -1, sel: null, mark: null, now: 0 }); scroll.scrollLeft = 0; draw(); },
     addTile(tile) {
       const img = new Image();
       img.onload = () => requestAnimationFrame(draw);
@@ -111,8 +132,10 @@ function makeTimeline(root, on) {
     setWave(wave) { t.wave = wave; draw(); },
     setCuts(cuts, picked = -1) { t.cuts = cuts; t.picked = picked; draw(); },
     setHints(hints) { t.hints = hints; draw(); },
+    setChapters(spans) { t.chaps = spans; t.chapNow = -1; draw(); markChap(); },
+    setNotes(times) { t.notes = times; draw(); },
     setSel(sel, mark = null) { t.sel = sel; t.mark = mark; draw(); },
-    setNow(ms, playing) { t.now = ms; if (playing) follow(); head.style.left = `${xOf(ms)}px`; },
+    setNow(ms, playing) { t.now = ms; if (playing) follow(); head.style.left = `${xOf(ms)}px`; markChap(); },
     zoom(dir) {
       const i = Math.max(0, Math.min(ZOOMS.length - 1, ZOOMS.indexOf(t.zoom) + dir));
       t.zoom = ZOOMS[i];

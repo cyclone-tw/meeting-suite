@@ -9,18 +9,29 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
+import { fileURLToPath } from "node:url";
 
 export function claudeBin(env = process.env) {
   return env.CYCLONE_CLAUDE_BIN || path.join(os.homedir(), ".local", "bin", "claude");
 }
 
-export function claudeArgs(model, systemPrompt) {
+// 查 wiki 的 MCP 轉接器（scripts/wiki-mcp.mjs）用工作室自己的 node 跑
+export const WIKI_MCP = fileURLToPath(new URL("../scripts/wiki-mcp.mjs", import.meta.url));
+
+// 外部來源（#192，只有 Ask AI 勾了才帶）：
+//   web  → 只開 WebSearch（搜尋），不開 WebFetch：字幕是不可信資料，不讓它能叫 agent 去開任意網址
+//   wiki → 只掛 wiki 轉接器（query 搜尋、get 讀全文，都是唯讀；見 lib/wiki-mcp.mjs），{ bin }＝wiki 查詢工具
+// 都沒有時和以前一樣：沒有任何工具、空的 MCP 設定
+export function claudeArgs(model, systemPrompt, { web = false, wiki = null } = {}) {
+  const servers = wiki ? { wiki: { command: process.execPath, args: [WIKI_MCP, "--bin", wiki.bin] } } : {};
+  const allowed = [...(web ? ["WebSearch"] : []), ...(wiki ? ["mcp__wiki"] : [])];
   return [
     "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
     "--model", model, "--no-session-persistence", "--system-prompt", systemPrompt,
-    "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+    "--strict-mcp-config", "--mcp-config", JSON.stringify({ mcpServers: servers }),
     "--setting-sources", "", "--disable-slash-commands",
-    "--tools", "",  // variadic，放最後
+    ...(allowed.length ? ["--allowedTools", ...allowed] : []),
+    "--tools", web ? "WebSearch" : "",  // variadic，放最後
   ];
 }
 
@@ -53,9 +64,9 @@ export function addResultUsage(usage, ev, state) {
   }
 }
 
-export function openClaude(systemPrompt, { model = process.env.CYCLONE_SUBTITLE_MODEL || "sonnet", timeoutMs = 300_000, command } = {}) {
+export function openClaude(systemPrompt, { model = process.env.CYCLONE_SUBTITLE_MODEL || "sonnet", timeoutMs = 300_000, command, sources } = {}) {
   const workdir = fs.mkdtempSync(path.join(os.tmpdir(), "rt-claude-"));
-  const [bin, ...args] = command || [claudeBin(), ...claudeArgs(model, systemPrompt)];
+  const [bin, ...args] = command || [claudeBin(), ...claudeArgs(model, systemPrompt, sources)];
   const lines = [];
   let waiter = null, closed = false, spawnError = null;
   const proc = spawn(bin, args, { cwd: workdir, stdio: ["pipe", "pipe", "ignore"], env: agentEnv() });
@@ -65,6 +76,7 @@ export function openClaude(systemPrompt, { model = process.env.CYCLONE_SUBTITLE_
   createInterface({ input: proc.stdout }).on("line", (line) => { lines.push(line); waiter?.(); });
   proc.on("exit", () => { closed = true; waiter?.(); });
   const usage = newUsage(), state = { procCost: 0 };
+  const tools = {};   // 這個程序用過的工具：名稱 → 次數（#192，Ask AI 標出這題查了哪些來源）
 
   async function ask(prompt) {
     proc.stdin.write(JSON.stringify({ type: "user", message: { role: "user", content: prompt } }) + "\n");
@@ -73,6 +85,7 @@ export function openClaude(systemPrompt, { model = process.env.CYCLONE_SUBTITLE_
       while (lines.length) {
         let ev;
         try { ev = JSON.parse(lines.shift()); } catch { continue; }
+        if (ev.type === "assistant") countTools(tools, ev);
         if (ev.type !== "result") continue;
         addResultUsage(usage, ev, state);
         if (ev.is_error) throw new Error("Claude reported an error");
@@ -91,7 +104,12 @@ export function openClaude(systemPrompt, { model = process.env.CYCLONE_SUBTITLE_
     fs.rmSync(workdir, { recursive: true, force: true });
   }
 
-  return { ask, close, usage };
+  return { ask, close, usage, tools };
+}
+
+export function countTools(tools, ev) {
+  const content = Array.isArray(ev?.message?.content) ? ev.message.content : [];
+  for (const c of content) if (c && c.type === "tool_use" && typeof c.name === "string") tools[c.name] = (tools[c.name] || 0) + 1;
 }
 
 // 回覆裡的 JSON 物件（容許 ```json 圍欄或前後多餘文字）。

@@ -1,28 +1,29 @@
 #!/usr/bin/env node
 // Bring corrections added in the meeting app (meeting_scribe_url and the standby)
-// back into the shared vocabulary note. The note must live in a git checkout:
-// profile.shared_vocabulary.repo (relative to home) and .wiki_path (the note
-// inside it). Optional: lint and secret-scan scripts in that repo run first.
+// back into the shared vocabulary note. The note lives in the user's wiki
+// (profile.shared_vocabulary.wiki_path) and is read and written through the wiki
+// tool (profile.wiki_cli): get the note with its receipt, append, put it back (#197).
 //
-//   pnpm run vocab:harvest --check     # list what each host added (pnpm 11: no "--")
-//   pnpm run vocab:harvest             # append them to the note, lint, commit, push
+//   pnpm run vocab:harvest --check             # list what each host added (pnpm 11: no "--")
+//   pnpm run vocab:harvest --agent <name>      # append them to the note and put it back
 //
 // Each host's GET /api/corrections has `pending`: pairs it added that the note
 // does not have yet. Conflicts (the note already maps the same wrong form to
 // something else) are only listed: fix them in the note or remove them from the
-// host. Once the hosts pull the new note, their pending list empties itself.
+// host. Once the hosts read the new note, their pending list empties itself.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
-import { loadAsrProfile, sharedVocabulary } from "../lib/asr-profile.mjs";
-import { appendToSharedNote, classifyPending, ownerHome, parseSharedVocabulary } from "../lib/vocabulary.mjs";
+import { loadAsrProfile, vocabularySource } from "../lib/asr-profile.mjs";
+import { NOTE_TTL_MS, appendToSharedNote, classifyPending, dropNoteCache, ownerHome, parseSharedVocabulary } from "../lib/vocabulary.mjs";
+import { wikiRun } from "../lib/wiki-cli.mjs";
 
 function usage() {
-  return `Usage: vocab-harvest [--check] [--json]
+  return `Usage: vocab-harvest [--check] [--json] [--agent <name>]
 
-  --check   list only; never writes (exit 1 when there is something to bring back)
-  --json    print the result as JSON`;
+  --check          list only; never writes (exit 1 when there is something to bring back)
+  --json           print the result as JSON
+  --agent <name>   who is writing, as the wiki tool records it (default: shared_vocabulary.agent in the user profile)`;
 }
 
 function hosts(env = process.env) {
@@ -39,52 +40,70 @@ async function pendingOf(url) {
   return j.pending || {};
 }
 
-// quiet：失敗時只說哪支沒過，不印它的輸出（掃描器可能回顯命中的內容）
-const run = (cmd, args, opts = {}) => {
-  const { quiet, ...rest } = opts;
-  const r = spawnSync(cmd, args, { encoding: "utf8", ...rest });
-  if (r.status !== 0) throw new Error(`${path.basename(cmd)} ${args.slice(0, 2).join(" ")} failed${quiet ? "" : `: ${(r.stderr || r.stdout || "").trim().split("\n").slice(-2).join(" ").slice(0, 300)}`}`);
-  return r.stdout;
-};
-const stamp = () => new Date().toISOString().replace(/[-:]/g, "").replace(/\..*$/, "").replace("T", "-");
+const WRITE_TIMEOUT_MS = 300_000;
+const frontMatter = (text) => /^---\r?\n[\s\S]*?\r?\n---\r?\n/.exec(text)?.[0] || "";
 
-// 在 wiki 的暫時 worktree 改正本、跑 lint 與 secret scan、commit、push 到 main，最後一定移除 worktree。
-// 要加的先對 origin/main 上最新的正本再比一次：本機的正本可能還沒更新（剛收過一次、別人剛改過），
-// 已經有的不重複寫，變成衝突的也不寫。回傳 { sha, fixed, hints, skipped }；沒有要寫的就不 commit（sha 是空的）
-export function writeToWiki({ wiki, rel, add, message, worktrees }) {
-  run("git", ["-C", wiki, "fetch", "-q", "origin"]);
-  const wt = path.join(worktrees, `${path.basename(wiki)}-vocab-harvest-${stamp()}-${process.pid}`);
-  run("git", ["-C", wiki, "worktree", "add", "-q", "--detach", wt, "origin/main"]);
+// 稿件（要寫回的整篇）固定放這裡：寫不進去時留著，下次寫成功就收掉
+export const draftPath = (home = ownerHome()) => path.join(home, ".config", "recording-transcriber", "vocab-harvest-draft.md");
+
+// 讀正本與它的收據（get 的 JSON：之後 put 要原樣交回去，wiki 用裡面的 blob 判斷有沒有人改過）
+export function readNoteReceipt({ bin, note, env }) {
+  const r = wikiRun(bin, ["get", "--", note], { timeoutMs: 30_000, ...(env ? { env } : {}) });
+  if (!r.ok) throw new Error(`詞彙未載入：正本讀不到（${r.reason}）`);
+  let j = null;
+  try { j = JSON.parse(r.stdout); } catch { /* 下一行一起擋 */ }
+  if (j?.ok !== true || j.path !== note || typeof j.content !== "string" || !/^[0-9a-f]{40}$/.test(String(j.blob))) throw new Error("詞彙未載入：wiki 工具回的不是這一篇的收據");
+  return { raw: r.stdout, content: j.content };
+}
+
+// 把 add 接到正本對應段落的最後，整篇（frontmatter、id 原樣）put 回去。只寫 note 這一篇。
+// 寫不進去（讀了之後有人改過＝blob 對不上、連不上、逾時）就把稿件留在 draft、丟錯：不重新取 blob 再送，
+// 重跑一次會重新讀最新的正本。回傳 { commit }
+export function writeToWiki({ bin, note, agent, base, add, draft = draftPath(), env }) {
+  const body = appendToSharedNote(base.content, add);
+  if (frontMatter(body) !== frontMatter(base.content)) throw new Error("寫回的稿件動到了 frontmatter，沒有寫入");
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "vocab-harvest-"));
   try {
-    const file = path.join(wt, rel);
-    const current = fs.readFileSync(file, "utf8");
-    const latest = parseSharedVocabulary(current);
-    if (latest.error) throw new Error(`origin/main 上的正本看不懂（${latest.error}），沒有寫入`);
-    const fresh = classifyPending([{ fixed: add.fixed || [], hints: add.hints || [] }], latest);
-    const skipped = (add.fixed || []).length + (add.hints || []).length - fresh.fixed.length - fresh.hints.length;
-    if (!fresh.fixed.length && !fresh.hints.length) return { sha: "", fixed: [], hints: [], skipped };
-    fs.writeFileSync(file, appendToSharedNote(current, fresh));
-    const env = { ...process.env, CYCLONE_WIKI_ROOT: wt };
-    // 筆記 repo 有 lint／掃描腳本就先跑（沒有就略過）
-    if (fs.existsSync(path.join(wt, "scripts", "wiki-lint.sh"))) run("bash", ["scripts/wiki-lint.sh", rel], { cwd: wt, env });
-    if (fs.existsSync(path.join(wt, "scripts", "privacy-scan.sh"))) run("bash", ["scripts/privacy-scan.sh", rel], { cwd: wt, env, quiet: true });
-    run("git", ["-C", wt, "add", "--", rel]);
-    run("git", ["-C", wt, "commit", "-q", "-m", message]);
-    run("git", ["-C", wt, "push", "-q", "origin", "HEAD:main"]);
-    return { sha: run("git", ["-C", wt, "rev-parse", "--short", "HEAD"]).trim(), fixed: fresh.fixed, hints: fresh.hints, skipped };
+    const baseFile = path.join(work, "base.json"), bodyFile = path.join(work, "body.md");
+    fs.writeFileSync(baseFile, base.raw, { mode: 0o600 });
+    fs.writeFileSync(bodyFile, body, { mode: 0o600 });
+    const r = wikiRun(bin, ["put", "--agent", agent, "--base-json", baseFile, "--body-file", bodyFile, "--", note], { timeoutMs: WRITE_TIMEOUT_MS, ...(env ? { env } : {}) });
+    let reply = null;
+    if (r.ok) { try { reply = JSON.parse(r.stdout); } catch { /* 當成沒確認 */ } }
+    if (reply?.ok === true) {
+      fs.rmSync(draft, { force: true });
+      return { commit: typeof reply.commit === "string" ? reply.commit : "" };
+    }
+    fs.mkdirSync(path.dirname(draft), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(draft, body, { mode: 0o600 });
+    fs.chmodSync(draft, 0o600);
+    const why = r.ok ? "wiki 工具沒有回確認" : r.reason;
+    const unsure = r.ok || r.kind === "timeout" || ["A1-timeout", "A1-unavailable"].includes(r.code);
+    const hint = r.code === "blob-conflict" ? "讀了之後有人改過正本；再跑一次會讀最新的正本再接上去"
+      : unsure ? "結果沒確認，可能已經寫進去；再跑一次會先讀最新的正本，已經有的不會重複寫" : "再跑一次會重新讀正本";
+    throw new Error(`正本沒有寫入（${why}${r.requestId ? `，request_id ${r.requestId}` : ""}）。${hint}。稿件留在 ${draft}`);
   } finally {
-    spawnSync("git", ["-C", wiki, "worktree", "remove", "--force", wt], { stdio: "ignore" });
+    fs.rmSync(work, { recursive: true, force: true });
   }
 }
 
 async function main() {
   const args = process.argv.slice(2).filter((a) => a !== "--");
+  const at = args.indexOf("--agent");
+  const [, flagAgent] = at >= 0 ? args.splice(at, 2) : [];
   const bad = args.find((a) => !["--check", "--json", "--help", "-h"].includes(a));
   if (bad) { console.error(`vocab-harvest: unknown argument: ${bad}\n${usage()}`); return 2; }
   if (args.includes("--help") || args.includes("-h")) { console.log(usage()); return 0; }
   const check = args.includes("--check"), json = args.includes("--json");
-  const shared = sharedVocabulary();
-  if (!shared.path) { console.error("vocab-harvest: the shared vocabulary note was not found or is broken; nothing to compare with."); return 1; }
+  const profile = loadAsrProfile().profile;
+  const source = vocabularySource("shared_vocabulary", profile);
+  if (!source || source.problem) { console.error(`vocab-harvest: ${source?.problem || "set shared_vocabulary.wiki_path and wiki_cli in the user profile"}`); return 1; }
+  const agent = String(flagAgent ?? profile.shared_vocabulary?.agent ?? "").trim();
+  if (!check && !/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(agent)) { console.error("vocab-harvest: writing needs --agent <name> (or shared_vocabulary.agent in the user profile); nothing written."); return 1; }
+  // 每次都讀 wiki 上最新的正本（不用快取）：比對與寫回用同一份，收據也是它的
+  const base = readNoteReceipt(source);
+  const shared = parseSharedVocabulary(base.content);
+  if (shared.error) { console.error(`vocab-harvest: 正本看不懂（${shared.error}）; nothing to compare with.`); return 1; }
   const list = [], unreachable = [];
   for (const url of hosts()) {
     try { list.push(await pendingOf(url)); } catch (e) { unreachable.push(`${new URL(url).hostname.split(".")[0]}: ${e.message}`); }
@@ -99,20 +118,16 @@ async function main() {
     for (const [w, r, other, both] of result.conflicts) console.log(`  衝突 ${w} → ${r}（${both ? `另一台是 ${other}` : `正本是 ${other}`}；改正本，或從那台的對照拿掉）`);
   }
   const todo = result.fixed.length + result.hints.length;
-  if (!todo) { if (!json) console.log("[harvest] nothing to bring back"); return unreachable.length ? 1 : 0; }
+  if (!todo) {
+    if (!json) console.log("[harvest] nothing to bring back");
+    // 每台都問到了、也沒有要寫的：之前沒寫成的稿件已經不需要（例如那次其實寫進去了）
+    if (!check && !unreachable.length) fs.rmSync(draftPath(), { force: true });
+    return unreachable.length ? 1 : 0;
+  }
   if (check) return 1;
-  const p = loadAsrProfile().profile.shared_vocabulary || {};
-  const repo = typeof p.repo === "string" && p.repo.trim() ? p.repo.trim() : "";
-  const wiki = process.env.CYCLONE_WIKI_CHECKOUT || (repo ? path.resolve(ownerHome(), repo) : "");
-  if (!wiki || !p.wiki_path) throw new Error("set shared_vocabulary.repo and shared_vocabulary.wiki_path in the user profile");
-  const done = writeToWiki({
-    wiki, rel: p.wiki_path, add: result, worktrees: process.env.CYCLONE_WORKTREES || path.join(path.dirname(wiki), "worktrees"),
-    message: `docs(private): bring meeting-app corrections into the transcription vocabulary\n\n${todo} pair(s) from ${hosts().length} host(s).`,
-  });
-  if (!done.sha) { console.log(`[harvest] the latest note on main already has these (${done.skipped}); nothing written`); return 0; }
-  console.log(`[harvest] pushed ${done.sha} to ${path.basename(wiki)} main (${done.fixed.length + done.hints.length} pair(s)${done.skipped ? `, ${done.skipped} already there` : ""}); hosts pick it up on their next Wiki pull (about 15 minutes)`);
-  const qmd = path.join(wiki, "scripts", "qmd-refresh.sh");
-  if (fs.existsSync(qmd)) spawnSync("bash", [qmd], { cwd: wiki, stdio: "ignore" });
+  const done = writeToWiki({ ...source, agent, base, add: result });
+  dropNoteCache(source);   // 這台下一次轉錄就讀新的正本
+  console.log(`[harvest] wrote ${todo} pair(s) to the note${done.commit ? ` (${done.commit.slice(0, 7)})` : ""}; this tool reads it within ${NOTE_TTL_MS / 60_000} minutes`);
   return 0;
 }
 

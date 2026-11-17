@@ -38,12 +38,12 @@ test("author captions in the video's language are used; auto captions and transl
   assert.deepEqual(captionSource(info({ subtitles: { ko: [] } })), { kind: "author", track: "ko", lang: "ko" });
   // 不知道語言、有好幾軌作者字幕：有英文就用英文
   assert.deepEqual(captionSource(info({ subtitles: { de: [], "en-GB": [] }, automatic_captions: { fr: [] } })), { kind: "author", track: "en-GB", lang: "en" });
-  assert.deepEqual(captionSource(info({ subtitles: { de: [], fr: [] } })), { kind: "none", track: "", lang: "en" }, "猜不出來就送辨識");
+  assert.deepEqual(captionSource(info({ subtitles: { de: [], fr: [] } })), { kind: "none", track: "", lang: "en", guessed: true }, "猜不出來：標成 guessed，匯入時請使用者選語言（#182）");
   // 聊天室重播不是字幕
   assert.deepEqual(captionSource(info({ language: "en", subtitles: { live_chat: [] } })), { kind: "none", track: "", lang: "en" });
   // 使用者指定的語言優先
   assert.deepEqual(captionSource(info({ language: "en", subtitles: { en: [], ja: [] } }), "ja"), { kind: "author", track: "ja", lang: "ja" });
-  assert.deepEqual(captionSource(info({})), { kind: "none", track: "", lang: "en" });
+  assert.deepEqual(captionSource(info({})), { kind: "none", track: "", lang: "en", guessed: true }, "什麼都沒有：也是猜的");
   const small = pickInfo({ id: "x", title: " a\nb ", formats: [{ big: 1 }], subtitles: { en: [{ url: "u" }] } });
   assert.deepEqual(small.subtitles, { en: true });
   assert.equal(small.title, "a b");

@@ -31,11 +31,10 @@ async function quit(force = false) {
   clearTimeout(saveTimer);
   state.id = "";
   setView("closed");
-  for (const id of ["#homeBtn", "#burnOpen", "#ytOpen", "#wikiOpen", "#settingsBtn", "#langBtn", "#quitBtn", "#steps"]) $(id).hidden = true;
+  for (const id of ["#burnOpen", "#ytOpen", "#wikiOpen", "#settingsBtn", "#langBtn", "#quitBtn", "#steps"]) $(id).hidden = true;
   $("#projName").textContent = "";
   $("#privBadge").hidden = true;
-  video.removeAttribute("src");
-  video.load();
+  video.unload();
 }
 $("#quitBtn").onclick = () => quit();
 $("#quitForce").onclick = () => quit(true);
@@ -62,6 +61,9 @@ async function switchLang() {
 $("#langBtn").onclick = () => switchLang();
 
 
-// ---- 開始 ----
-const hashId = location.hash.slice(1);
-if (/^[0-9a-f]{16}$/.test(hashId)) openProject(hashId); else showHome();
+// ---- 開始（#184）：一進來就是三欄外框，左欄影片庫；網址帶專案就開那個，不然打開上次的專案，都沒有才是「從左邊挑一支影片」----
+$("#shell").hidden = false;
+applyLayout();
+const hashId = location.hash.slice(1), isId = (x) => /^[0-9a-f]{16}$/.test(x || "");
+const lastId = layoutGet(LAYOUT_KEYS.last);
+if (isId(hashId) || isId(lastId)) { renderLib(); loadTools(); openProject(isId(hashId) ? hashId : lastId, { quiet: !isId(hashId) }); } else showHome();

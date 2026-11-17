@@ -43,7 +43,17 @@ const setup = (p, { ai = false, polish = false } = {}) =>
   p.ev(`document.getElementById("ai").checked = ${ai};
         if (document.getElementById("polish")) document.getElementById("polish").checked = ${polish};
         engine.value = "whisper"; engine.onchange(); true`);
-const record = async (p, ms) => { await p.ev(`document.getElementById("btn").click()`); await p.until("recording"); await sleep(ms); };
+const record = async (p, ms) => {
+  await p.ev(`document.getElementById("btn").click()`);
+  // 開始錄音要等伺服器登記、瀏覽器取得假麥克風並載入 audioWorklet；排程 e2e 在冷啟動的 CI 機器上第一個情境偶爾超過 20 秒，所以放寬到 60 秒（真的卡死仍會失敗）
+  try { await p.until("recording", 60000); }
+  catch (e) {
+    // 等不到開始錄音時，把頁面當下的狀態寫進錯誤：是卡在連線、選到別的引擎還是出錯，光看「等不到」分不出來
+    const now = await p.ev(`JSON.stringify({ status: document.getElementById("status").textContent, engine: engine.value, engineNow: typeof engineNow === "undefined" ? null : engineNow, phase, btnDisabled: document.getElementById("btn").disabled })`).catch(() => "（讀不到頁面）");
+    throw new Error(`${e.message}；頁面狀態：${now}`);
+  }
+  await sleep(ms);
+};
 // 停止錄音；有議程還沒談完會先跳出提醒（#97），這裡一律選「仍要結束」
 const stopRec = async (p) => {
   await p.ev(`document.getElementById("btn").click(); if (!agRemind.hidden) agRemindEnd.click(); true`);
@@ -960,6 +970,120 @@ m = json.load(sys.stdin); print(json.dumps({"mermaid": server.mindmap_mermaid(m)
     }, { wav: SILENT });
   },
 
+  // 問 AI（#214）：有逐字稿就出現頁籤；預設問題一按就問，回答的時間點按了跳到逐字稿；第二題帶前文；
+  // 對話記進暫存、存 Drive 多一個 ask.md；清除要按兩次
+  async "ask-ai"() {
+    await withEnv(async ({ page: p, work, port }) => {
+      await setup(p, { ai: true });
+      assert(await p.ev(`$("tab-ask").hidden`), "還沒有逐字稿：不出現問 AI");
+      await record(p, 12000);
+      await p.until(`!$("tab-ask").hidden`, 5000);
+      await stopRec(p);
+      await p.until("!!summary", 30000);
+      await p.ev(`selectTab("ask"); true`);
+      assert(await p.ev(`askStarters.querySelectorAll("button").length`) === 4, "四個預設問題");
+      await p.ev(`askStarters.querySelector("button").click(); true`);
+      await p.until(`askLog.length === 1 && !askBusy`, 20000);
+      const first = await p.ev(`askLog[0]`);
+      assert(/重點/.test(first.q) && /問題：這場會議的重點/.test(first.a), `預設問題照送：${JSON.stringify(first)}`);
+      const stamp = await p.ev(`fmtTime(askParas()[0].start)`);
+      const t = await p.ev(`[...document.querySelectorAll("#askLog .ask-t")].map((b) => b.textContent)`);
+      assert(t.length === 1 && t[0] === stamp, `回答裡的時間變成按鈕，照抄第一段的時間 ${stamp}：${t}`);
+      assert(await p.ev(`askStarters.hidden`), "問過就收起預設問題");
+      await p.ev(`document.querySelector("#askLog .ask-t").click(); true`);
+      await p.until(`!!document.querySelector(".seg.flash")`, 3000);
+      // 第二題：Enter 送出（選字中的 Enter 不算），帶前文
+      await p.ev(`askQ.value = "第二題"; askQ.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true })); true`);
+      assert(await p.ev(`!askBusy && askLog.length === 1`), "選字中的 Enter 不送出");
+      await p.ev(`askQ.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); true`);
+      await p.until(`askLog.length === 2 && !askBusy`, 20000);
+      assert(await p.ev(`askLog[1].a.endsWith("（有前文）") && askQ.value === ""`), `第二題帶前文、送出後清空輸入：${await p.ev("askLog[1].a")}`);
+      // 記進暫存：重新整理後回到這場還在
+      const did = await p.ev("draftId");
+      await new Promise((r) => setTimeout(r, 2600));
+      const got = await (await fetch(`http://127.0.0.1:${port}/api/drafts/get?draft=${did}`)).json();
+      assert(got.ai?.ask?.length === 2 && got.ai.ask[1].q === "第二題", `暫存要有兩題：${JSON.stringify(got.ai?.ask)}`);
+      // 存 Drive：多一個 ask.md
+      await p.ev(`saveRoot.value = "t"; saveFolder.value = "e2e"; saveTitle.value = "ask"; saveAudio.checked = false; saveBtn.click(); true`);
+      await p.until(`/已存到/.test(document.getElementById("saveStatus").textContent)`, 20000);
+      const dir = fs.readdirSync(path.join(work, "drive", "e2e"))[0];
+      const md = fs.readFileSync(path.join(work, "drive", "e2e", dir, "ask.md"), "utf8");
+      assert(/^# 問 AI\n/.test(md) && /## 2\. 第二題/.test(md), `ask.md：${md.slice(0, 200)}`);
+    });
+  },
+
+  // 問 AI 的清除與錯誤（#214）：清除要 5 秒內按兩次；AI 沒回答時說明、問題留著可以再送
+  async "ask-ai-clear"() {
+    await withEnv(async ({ page: p }) => {
+      await setup(p, { ai: true });
+      await record(p, 8000);
+      await stopRec(p);
+      await p.until(`!$("tab-ask").hidden`, 5000);
+      await p.ev(`selectTab("ask"); askQ.value = "有誰發言？"; askForm.requestSubmit(); true`);
+      await p.until(`askLog.length === 1 && !askBusy`, 20000);
+      await p.ev(`askClear.click(); true`);
+      assert(await p.ev(`askLog.length === 1 && /再按一次/.test(askClear.textContent)`), "按一次只是提醒");
+      await p.ev(`askClear.click(); true`);
+      assert(await p.ev(`askLog.length === 0 && askClear.hidden && !askStarters.hidden`), "按第二次才清除");
+      await p.ev(`askQ.value = "空白題"; window.__fakeAsk = postJson; postJson = async (u, b) => (u === "/api/agent/ask" ? new Response(JSON.stringify({ error: "AI 整理失敗（ValueError）" }), { status: 502 }) : window.__fakeAsk(u, b)); askForm.requestSubmit(); true`);
+      await p.until(`!askBusy && /沒有回答成功/.test(askNote.textContent)`, 5000);
+      assert(await p.ev(`askQ.value === "空白題" && askLog.length === 0`), "失敗時問題留著");
+    });
+  },
+
+  // 匯出（#215）：一個選單出 TXT、SRT、VTT、完整紀錄 Markdown／Word／PDF；完整紀錄含總結、會議紀錄、問 AI、逐字稿；
+  // PDF 走列印，只印 #printDoc，印完收乾淨；沒有時間的逐字稿不能做字幕
+  async "exports"() {
+    await withEnv(async ({ page: p }) => {
+      await setup(p, { ai: true });
+      await record(p, 12000);
+      await stopRec(p);
+      await p.until("!!summary", 30000);
+      await p.ev(`minGo.click(); true`);
+      await p.until("!!minutes", 20000);
+      await p.ev(`selectTab("ask"); askQ.value = "有哪些待辦？"; askForm.requestSubmit(); true`);
+      await p.until(`askLog.length === 1 && !askBusy`, 20000);
+      await p.ev(`window.__dl = []; downloadBlob = (b, n) => window.__dl.push({ n, b }); window.__printed = null;
+        window.print = () => { window.__printed = { on: document.body.classList.contains("printing"), h1: printDoc.querySelector("h1")?.textContent, title: document.title,
+          only: getComputedStyle(printDoc).display === "block" && [...document.body.children].filter((e) => e.id !== "printDoc" && e.tagName !== "SCRIPT").every((e) => getComputedStyle(e).display === "none"),
+          h2: [...printDoc.querySelectorAll("h2")].map((h) => h.textContent), tables: printDoc.querySelectorAll("table").length }; dispatchEvent(new Event("afterprint")); }; true`);
+      const pick = async (kind) => {
+        await p.ev(`dl.click(); true`);
+        assert(await p.ev(`!exportMenu.hidden && dl.getAttribute("aria-expanded") === "true"`), "按匯出打開選單");
+        await p.ev(`exportMenu.querySelector('[data-export="${kind}"]').click(); true`);
+        assert(await p.ev(`exportMenu.hidden`), "選了就收起來");
+      };
+      for (const k of ["txt", "srt", "vtt", "md", "docx"]) await pick(k);
+      await p.until(`__dl.length === 5`, 10000);
+      const got = await p.ev(`Promise.all(__dl.map(async (x) => ({ n: x.n, t: x.n.endsWith(".docx") ? await x.b.slice(0, 2).text() : await x.b.text(), size: x.b.size })))`);
+      const [txt, srt, vtt, md, docx] = got;
+      assert(/^transcript-\d{12}\.txt$/.test(txt.n) && /\[00:00:0\d\]/.test(txt.t), `逐字稿：${txt.n}`);
+      assert(/^meeting-\d{12}\.srt$/.test(srt.n) && /^1\n00:00:\d\d,\d{3} --> 00:00:\d\d,\d{3}\n/.test(srt.t), `SRT：${srt.n} ${srt.t.slice(0, 60)}`);
+      assert(/^WEBVTT\n\n00:00:/.test(vtt.t), `VTT：${vtt.t.slice(0, 40)}`);
+      for (const h of ["## 簡介", "## 完整總結", "## 會議紀錄", "### 待辦事項", "## 問 AI", "### 1. 有哪些待辦？", "## 逐字稿"]) assert(md.t.includes(h), `完整紀錄要有「${h}」`);
+      assert(!/^#+ 會議紀錄：/m.test(md.t), "會議紀錄自己的大標題與日期拿掉，不和文件標題重複");
+      assert(docx.n.endsWith(".docx") && docx.t === "PK" && docx.size > 2000, `Word：${docx.n} ${docx.size}`);
+      // PDF：列印時只有 #printDoc，標題是檔名；印完收乾淨
+      await p.send("Emulation.setEmulatedMedia", { media: "print" });   // 列印樣式只在列印媒體生效
+      await pick("pdf");
+      await p.send("Emulation.setEmulatedMedia", { media: "" });
+      const pr = await p.ev(`window.__printed`);
+      assert(pr && pr.on && pr.only && pr.h1 && /^meeting-\d{12}$/.test(pr.title) && pr.h2.includes("逐字稿") && pr.tables >= 1, `列印內容（只印完整紀錄）：${JSON.stringify(pr)}`);
+      assert(await p.ev(`!document.body.classList.contains("printing") && !printDoc.childElementCount && !/^meeting-/.test(document.title)`), "印完收乾淨");
+      assert(/儲存為 PDF/.test(await p.ev(`exportNote.textContent`)), "提示怎麼存 PDF");
+      // 連按兩次（或瀏覽器沒發 afterprint）：標題還是還原成原本的，不會卡成檔名（#217）
+      const title0 = await p.ev(`document.title`);
+      await p.ev(`window.print = () => {}; printDocument("# a", "x-1"); printDocument("# b", "x-2"); dispatchEvent(new Event("afterprint")); true`);
+      assert(await p.ev(`document.title`) === title0, `標題要還原：${await p.ev("document.title")}`);
+      // 鍵盤：Esc 收起、焦點回到按鈕
+      await p.ev(`dl.click(); exportMenu.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); true`);
+      assert(await p.ev(`exportMenu.hidden && document.activeElement === dl`), "Esc 收起選單");
+      // 沒有時間的逐字稿（匯入純文字）：字幕兩項不能按
+      await p.ev(`segs.forEach((s) => { s.start = null; }); dl.click(); true`);
+      assert(await p.ev(`exportMenu.querySelector('[data-export="srt"]').disabled && exportMenu.querySelector('[data-export="vtt"]').disabled && !exportMenu.querySelector('[data-export="md"]').disabled`), "沒有時間不能做字幕");
+    });
+  },
+
   // 心智圖編輯：改中心、加子項、Enter 加同層、刪除＋復原；圖、Mermaid、.opml 跟著變；改過要按兩次才重新產生；
   // 存 Drive 多 mindmap.opml；重新整理開回這場，修改還在（#3）
   async "mindmap-edit"() {
@@ -1568,11 +1692,15 @@ print("\\n".join("".join(re.findall(r"<w:t(?: [^>]*)?>([^<]*)</w:t>", p)) for p 
       // 十萬句：送 AI 的請求在頁面上直接回 202（只測頁面本身），要在時限內排完、到會後畫面
       await p.ev(`window.__fetch = fetch; window.__paras = 0; fetch = (u, o) => ["/api/agent/para", "/api/agent/end"].some((k) => String(u).includes(k)) ? (__paras++, Promise.resolve(new Response("{}", { status: 202 }))) : __fetch(u, o); true`);
       fs.writeFileSync(path.join(dir, "many.txt"), Array.from({ length: 100000 }, () => "好").join("\n"));
+      // 「一次畫好，不是每句重畫整份」直接數畫了幾次：次數跟機器快慢無關；牆上時鐘在共用的 CI 機器上會因冷啟動、搶資源差到兩三倍（排程 e2e 曾在 10 秒門檻上偶發失敗）
+      await p.ev(`window.__renders = 0; (() => { const real = renderSegs; renderSegs = (...a) => { __renders++; return real(...a); }; })(); true`);
       const t0 = Date.now();
       await pick(path.join(dir, "many.txt"));
       await p.until(`phase === "done"`, 30000);
       const ms = Date.now() - t0;
-      assert(ms < 10000, `十萬句要在 10 秒內排完（一次畫好，不是每句重畫整份）：${ms} ms`);
+      const renders = await p.ev(`__renders`);
+      assert(renders >= 1 && renders <= 3, `十萬句只能整份畫 1～3 次，不能每句都重畫（0 次表示攔截沒生效）：畫了 ${renders} 次（${ms} ms）`);
+      assert(ms < 30000, `十萬句要在 30 秒內排完（只擋嚴重變慢，快慢以畫的次數為準）：${ms} ms`);
       assert(await p.ev(`segs.length`) === 100000 && await p.ev(`!$("btn").disabled`), "十萬句都要排好，按鈕恢復");
       assert(await p.ev(`__paras`) >= 600, `照 150 字分段：${await p.ev("__paras")}`);
     });

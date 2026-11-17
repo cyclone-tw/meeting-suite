@@ -153,13 +153,15 @@ async function prepareInner(o, { work, onStep, signal, report }) {
   const keep = trimmed ? o.keep : null;
   // 辨識結果存在 o.asrCache（Studio 是專案裡的 asr.json）：出錯重試、重新處理、剪得更短，
   // 都直接用存著的，不再付一次辨識費（#28、#30）
-  const cacheKey = asrCacheKey(video, o.engine, o.lang);
+  const cacheKey = asrCacheKey(video, o.engine, o.lang, o.cacheId);
   const cached = readAsrCache(o.asrCache, cacheKey, keep);
   const synced = await syncCorrections();
   report.corrections = correctionsSummary(synced);
   const corrections = synced.corrections;
   // 共用用詞正本（#84）：一定替換、口述替換、誤聽對照都給 AI 當參考，同一個錯誤寫法只留一次
   const shared = sharedVocabulary();
+  // 正本這次沒從 wiki 讀到（或只有舊的那一份）：記在報告裡，畫面和指令的結尾都會說（#197）
+  if (!["absent", "loaded"].includes(shared.state)) report.vocabulary = shared.state === "stale" ? "stale" : "unavailable";
   const known = new Set(corrections.hints.map(([w]) => w));
   for (const pair of [...Object.entries(profileVocabulary()), ...Object.entries(shared.dictation), ...shared.hints]) {
     if (!known.has(pair[0])) { known.add(pair[0]); corrections.hints.push(pair); }
@@ -182,7 +184,9 @@ async function prepareInner(o, { work, onStep, signal, report }) {
 
 // 快取的 key：影片（路徑、大小、修改時間）和引擎；影片換了就重新辨識。
 // 外語影片（#56）另外帶語言：改了語言要重新辨識（中文影片的 key 不變，舊的快取照樣用得到）
-function asrCacheKey(video, engine, lang) {
+// cacheId（#182）：YouTube 連結專案只抓音檔辨識，音檔辨識完就刪；用「youtube:<影片 id>」當鍵，之後重試、重新處理對得上快取，不再抓也不再付費
+function asrCacheKey(video, engine, lang, cacheId) {
+  if (cacheId) return JSON.stringify({ source: String(cacheId), engine, ...(foreign(lang) ? { lang } : {}) });
   let st = { size: 0, mtimeMs: 0 };
   try { st = fs.statSync(video); } catch { /* 讀不到就不會對上 */ }
   return JSON.stringify({ video, size: st.size, mtime: Math.round(st.mtimeMs), engine, ...(foreign(lang) ? { lang } : {}) });
@@ -193,6 +197,12 @@ const foreign = (lang) => Boolean(lang) && lang !== "zh";
 // 就只留這次範圍裡的字；有超出的部分才重新辨識。
 const inside = (ms, ranges) => ranges.some(([a, b]) => ms >= a && ms < b);
 const covered = (want, had) => !had || (want && want.every(([a, b]) => had.some(([c, d]) => a >= c && b <= d)));
+
+// 斷線中斷的辨識（soniox-pending.json）的鍵：有 cacheId 時用它，不用每次都在新暫存資料夾裡的音檔路徑，重試才接得回去（#182）
+export const sonioxPendingKey = (video, o, keep) => JSON.stringify({ video: asrCacheKey(video, o.engine, o.lang, o.cacheId), keep: keep || null });
+
+// 這支（cacheId）有沒有存著的辨識結果：有的話不用先抓音檔（#182）
+export const asrCached = (file, { cacheId, engine = "soniox", lang } = {}) => Boolean(readAsrCache(file, asrCacheKey("", engine, lang, cacheId), null));
 
 function readAsrCache(file, key, keep) {
   if (!file || !fs.existsSync(file)) return null;
@@ -241,7 +251,7 @@ async function recognise(o, { video, work, trimmed, corrections, report, onStep,
     const key = resolveSonioxKey();
     if (!key) throw new Error("no Soniox API key on this host");
     // 斷線中斷的辨識記在快取旁邊，重試時接回去（#64）；key 含影片與這次的剪輯範圍
-    const pending = o.asrCache ? { file: path.join(path.dirname(o.asrCache), "soniox-pending.json"), key: JSON.stringify({ video: asrCacheKey(video, o.engine, o.lang), keep: trimmed ? o.keep : null }) } : null;
+    const pending = o.asrCache ? { file: path.join(path.dirname(o.asrCache), "soniox-pending.json"), key: sonioxPendingKey(video, o, trimmed ? o.keep : null) } : null;
     let r;
     try {
       r = await transcribeFile(audio, { key, terms, pending, signal, ...(foreign(o.lang) ? { languageHints: [o.lang] } : {}) });

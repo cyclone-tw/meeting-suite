@@ -195,6 +195,7 @@ function main() {
   console.error(`[subtitle] executed_on=${report.executed_on || "none"}${report.fallback_reason ? ` (fallback: ${report.fallback_reason})` : ""}`);
   const corr = report.corrections;
   if (corr) console.error(`[corrections] ${corr.hints + corr.fixed} pairs from ${corr.source}${corr.error ? ` (meeting-scribe unreachable: ${corr.error})` : ""}`);
+  if (report.vocabulary) console.error(report.vocabulary === "stale" ? "[vocabulary] 共用詞彙表不是最新的：這次讀不到 wiki，用的是之前存的那一份" : "[vocabulary] 詞彙未載入：共用詞彙表這次沒讀到，只套用了個人設定裡的錯字表");
   if (report.soniox) console.error(`[cost] Soniox ${(report.soniox.audio_ms / 60000).toFixed(1)} min ≈ ${usd(report.soniox.cost_usd)}`);
   if (report.claude && report.proofreader !== "claude") console.error(`[cost] ${report.proofreader} ${report.claude.calls} calls (token usage not reported by this agent)`);
   else if (report.claude) console.error(`[cost] Claude ${report.claude.calls} calls, ${report.claude.input + report.claude.output + report.claude.cache_write + report.claude.cache_read} tokens, API-equivalent ${usd(report.claude.cost_usd)} (subscription)`);

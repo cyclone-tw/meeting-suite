@@ -3,7 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { loadPrivateVocabulary, loadSharedVocabulary, ownerHome } from "./vocabulary.mjs";
+import { NOTE_TTL_MS, loadPrivateVocabulary, loadSharedVocabulary, ownerHome } from "./vocabulary.mjs";
+import { wikiBin, wikiNotePath } from "./wiki-cli.mjs";
 
 // ASR habits. config/asr-profile.json in the repo holds the generic defaults;
 // the user's own values (vocabulary, servers, folders) live outside git in
@@ -84,6 +85,7 @@ export function loadAsrProfile() {
 
 export function resetAsrProfileCache() {
   cachedProfile = null;
+  vocabularyMemo.clear();
 }
 
 // Optional integrations. Each returns "" when the user has not configured it,
@@ -96,6 +98,15 @@ export function icloudInboxName(profile = loadAsrProfile().profile) {
   const name = typeof profile.icloud_inbox === "string" ? profile.icloud_inbox.trim() : "";
   if (!name || name.split("/").some((part) => part === ".." || part === ".")) return "";
   return name.replace(/^\/+|\/+$/g, "");
+}
+
+// wiki 工具（CLI）的指令名稱，例如 "my-wiki"：Ask AI 查 wiki（#192、#194）與詞彙筆記（#197）都用它。工具要有
+// `search -n <n> -- <關鍵字>`（輸出 JSON）與 `get --content -- <路徑>` 兩個唯讀指令；vocab-harvest 寫回還要
+// `get`（JSON 收據）與 `put`（見 lib/wiki-cli.mjs）。沒填或格式不對就沒有這些功能。
+// 只收字母、數字、點、底線、連字號：它會拼成固定資料夾底下的檔名，不能帶路徑
+export function wikiCli(profile = loadAsrProfile().profile) {
+  const name = typeof profile.wiki_cli === "string" ? profile.wiki_cli.trim() : "";
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(name) ? name : "";
 }
 
 export function icloudInboxDir(sub, { profile, home = os.homedir() } = {}) {
@@ -176,35 +187,48 @@ export function shouldApplyOpencc(language, sampleText = "") {
   return CJK.test(text) && !KANA.test(text) && !HANGUL.test(text);
 }
 
-let cachedSharedVocabulary = null;
-
-// Optional shared vocabulary: one Markdown note (format in lib/vocabulary.mjs)
-// used by every transcription tool. profile.shared_vocabulary.paths lists where
-// to look, relative to the home folder; the first existing one wins. The Studio
-// runs for days, so the note is read again whenever one of those files changes.
-function noteStamp(paths) {
-  const home = path.resolve(ownerHome());
-  return home + "|" + paths.map((rel) => {
-    try {
-      const st = fs.statSync(path.resolve(home, String(rel)));
-      return `${st.size}:${st.mtimeMs}`;
-    } catch {
-      return "-";
-    }
-  }).join("|");
+// 詞彙筆記（#197）：共用詞彙表與人名詞彙各是使用者 wiki 裡的一篇筆記，格式見 lib/vocabulary.mjs。
+// 個人設定填 shared_vocabulary.wiki_path／private_vocabulary.wiki_path（筆記在 wiki 裡的路徑）和 wiki_cli。
+// 回傳 null（沒設定這一篇）、{ problem }（設定了但不能用，要說出來）或 { note, bin }
+export function vocabularySource(section, profile = loadAsrProfile().profile, env = process.env) {
+  const cfg = isPlainObject(profile?.[section]) ? profile[section] : null;
+  if (!cfg) return null;
+  if (cfg.wiki_path === undefined) {
+    // #197 之前填的是本機檔案路徑（paths）。本機已經沒有 wiki，不能安靜地當成「沒設定」
+    return Array.isArray(cfg.paths) && cfg.paths.length ? { problem: `個人設定的 ${section} 還是本機路徑 paths，已經不讀了；請改填 wiki_path` } : null;
+  }
+  const note = wikiNotePath(cfg.wiki_path);
+  if (!note) return { problem: `個人設定的 ${section}.wiki_path 格式不對` };
+  const name = wikiCli(profile);
+  if (!name) return { problem: "個人設定沒有填 wiki_cli" };
+  return { note, bin: wikiBin(name, env, { home: ownerHome() }) };
 }
 
-export function sharedVocabulary() {
-  const raw = loadAsrProfile().profile.shared_vocabulary?.paths;
-  const paths = Array.isArray(raw) ? raw : [];
-  const stamp = noteStamp(paths);
-  if (cachedSharedVocabulary?.stamp === stamp) return cachedSharedVocabulary.value;
-  cachedSharedVocabulary = { stamp, value: loadSharedVocabulary({ paths }) };
-  return cachedSharedVocabulary.value;
+// 同一個程序裡（工作室會開好幾天）不必每次都讀：讀到的用到快取到期，沒讀到的一分鐘後再試。
+// 所以筆記改了，最慢 NOTE_TTL_MS 之後的下一次轉錄會讀到新版，不用重開
+const RETRY_MS = 60_000;
+const vocabularyMemo = new Map();
+
+function memoVocabulary(section, load, fresh) {
+  const source = vocabularySource(section);
+  const key = JSON.stringify([ownerHome(), source]);
+  const hit = vocabularyMemo.get(section);
+  const now = Date.now();
+  if (!fresh && hit && hit.key === key && now < hit.until) return hit.value;
+  const value = load({ source, ...(fresh ? { ttlMs: 0 } : {}) });
+  const keep = value.state === "absent" ? Infinity : value.state === "loaded" ? Math.max(0, NOTE_TTL_MS - value.ageMs) : RETRY_MS;
+  vocabularyMemo.set(section, { key, until: now + keep, value });
+  return value;
+}
+
+// 共用詞彙表：所有轉錄工具共用的那一篇。state 是 "loaded" 以外的值時，呼叫端要知道它沒有（或不是最新的）。
+// fresh：不用存的那一份，現在就問 wiki（要照正本去改別的東西的指令用）
+export function sharedVocabulary({ fresh = false } = {}) {
+  return memoVocabulary("shared_vocabulary", loadSharedVocabulary, fresh);
 }
 
 // Replacements every tool always applies. The shared note wins; the profile's
-// own list is only the fallback when no shared note exists.
+// own list is only the fallback when the shared note was not loaded.
 export function profileVocabulary() {
   const shared = sharedVocabulary();
   if (shared.path) return { ...shared.fixed };
@@ -217,16 +241,9 @@ export function profileVocabulary() {
   return map;
 }
 
-let cachedPrivateVocabulary = null;
-
-// Optional personal entries (names of people) kept outside git.
-// profile.private_vocabulary.paths lists where to look, relative to the home
-// folder; the first existing one wins. Missing file -> no entries.
+// 人名詞彙：不進 git 的個人資料（人名），同樣是 wiki 裡的一篇筆記
 export function privateVocabulary() {
-  if (cachedPrivateVocabulary) return cachedPrivateVocabulary;
-  const paths = loadAsrProfile().profile.private_vocabulary?.paths;
-  cachedPrivateVocabulary = loadPrivateVocabulary({ paths: Array.isArray(paths) ? paths : [] });
-  return cachedPrivateVocabulary;
+  return memoVocabulary("private_vocabulary", loadPrivateVocabulary);
 }
 
 let cachedToolFingerprint = "";
