@@ -2,9 +2,13 @@
 
 版本規則：別人升級後要動手才能繼續用（設定、存檔格式、拿掉功能、最低版本）升大版號；新功能升小版號；修正與文件升修補號。0.x 期間大版號降為小版號。
 
-## v0.7.0（2026-11-17）
+## v0.7.1（2026-11-17）
 
-### 新功能
+### 修正
+
+- make the Ask AI external-sources test independent of codex being installed (#199)
+
+## v0.7.0（2026-11-17）
 
 - read the vocabulary notes from the wiki tool, not local files (#197)
 - read the wiki for Ask AI through the wiki CLI instead of a local QMD index
@@ -19,8 +23,6 @@
 - color-code Markdown headings and bold text in MdView
 - export menu — transcript TXT, subtitles SRT/VTT, full record as Markdown, Word and PDF
 - Ask AI tab — ask about the meeting transcript with clickable time citations
-
-### 修正
 
 - keep the Drive row below the Extend tab in short windows
 - never overwrite a damaged library list that could not be backed up

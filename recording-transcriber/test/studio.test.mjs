@@ -3663,6 +3663,14 @@ test("Ask AI: one question at a time, stop closes it, failures keep the chat unc
 });
 
 test("Ask AI external sources: claude only, wiki needs a configured wiki CLI that is installed, sources asked and used are recorded (#192, #194)", async (t) => {
+  // 「這台有沒有裝 codex」會先於「只有 claude 能用」被檢查：指到一個假檔案，結果才不看這台電腦（公開版 CI 沒裝 codex，#199）
+  const fakeDir = fs.mkdtempSync(path.join(os.tmpdir(), "rt-ask-codex-"));
+  t.after(() => fs.rmSync(fakeDir, { recursive: true, force: true }));
+  const fakeCodex = path.join(fakeDir, "codex");
+  fs.writeFileSync(fakeCodex, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  const prevCodex = process.env.CYCLONE_CODEX_BIN;
+  process.env.CYCLONE_CODEX_BIN = fakeCodex;
+  t.after(() => { if (prevCodex === undefined) delete process.env.CYCLONE_CODEX_BIN; else process.env.CYCLONE_CODEX_BIN = prevCodex; });
   const asked = [];
   let wiki = null;
   const s = await startStudio(t, { deps: {
